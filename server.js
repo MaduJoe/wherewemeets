@@ -23,14 +23,28 @@ const app = express();
 const server = http.createServer(app);
 const io = socketIo(server, {
   cors: {
-    origin: process.env.NODE_ENV === 'production' 
-      ? [
-          'https://wherewemeets.com', 
-          'https://wherewemeets-production.up.railway.app',
-          'https://wherewemeets-client-cg7we1o8v-jkchos-projects.vercel.app',
-          'https://wherewemeets-client.vercel.app'
-        ]
-      : "http://localhost:3000",
+    origin: (origin, callback) => {
+      // 개발 환경
+      if (process.env.NODE_ENV !== 'production') {
+        return callback(null, true);
+      }
+      
+      // 프로덕션 환경 - 허용된 도메인 패턴
+      const allowedOrigins = [
+        'https://wherewemeets.com',
+        'https://wherewemeets-production.up.railway.app',
+        'https://wherewemeets-client.vercel.app'
+      ];
+      
+      // Vercel 프리뷰 도메인 패턴 허용
+      const vercelPattern = /^https:\/\/wherewemeets-client-[a-z0-9]+-jkchos-projects\.vercel\.app$/;
+      
+      if (!origin || allowedOrigins.includes(origin) || vercelPattern.test(origin)) {
+        callback(null, true);
+      } else {
+        callback(new Error('Not allowed by CORS'));
+      }
+    },
     methods: ["GET", "POST"],
     credentials: true
   }
@@ -86,14 +100,28 @@ app.set('io', io);
 
 // Middleware - CORS 설정
 app.use(cors({
-  origin: process.env.NODE_ENV === 'production' 
-    ? [
-        'https://wherewemeets.com', 
-        'https://wherewemeets-production.up.railway.app',
-        'https://wherewemeets-client-cg7we1o8v-jkchos-projects.vercel.app',
-        'https://wherewemeets-client.vercel.app'
-      ]
-    : 'http://localhost:3000',
+  origin: (origin, callback) => {
+    // 개발 환경
+    if (process.env.NODE_ENV !== 'production') {
+      return callback(null, true);
+    }
+    
+    // 프로덕션 환경 - 허용된 도메인 패턴
+    const allowedOrigins = [
+      'https://wherewemeets.com',
+      'https://wherewemeets-production.up.railway.app',
+      'https://wherewemeets-client.vercel.app'
+    ];
+    
+    // Vercel 프리뷰 도메인 패턴 허용
+    const vercelPattern = /^https:\/\/wherewemeets-client-[a-z0-9]+-jkchos-projects\.vercel\.app$/;
+    
+    if (!origin || allowedOrigins.includes(origin) || vercelPattern.test(origin)) {
+      callback(null, true);
+    } else {
+      callback(new Error('Not allowed by CORS'));
+    }
+  },
   credentials: true
 }));
 
