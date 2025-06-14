@@ -124,6 +124,15 @@ mongoose.connection.on('disconnected', () => {
   console.log('🔌 MongoDB 연결 해제됨');
 });
 
+// 헬스체크 엔드포인트
+app.get('/api/health', (req, res) => {
+  res.status(200).json({ 
+    status: 'OK', 
+    timestamp: new Date().toISOString(),
+    environment: process.env.NODE_ENV 
+  });
+});
+
 // 라우트 설정
 app.use('/api/auth', authRoutes);
 app.use('/api/meetings', meetingRoutes);
