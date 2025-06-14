@@ -10,9 +10,12 @@
   "scripts": {
     "start": "node server.js",
     "dev": "nodemon server.js",
-    "build": "cd client && npm install && npm run build",
+    "build": "node check-build.js && npm install && cd client && npm ci && npm run build && cd ..",
     "heroku-postbuild": "npm run build",
     "railway-build": "npm run build",
+    "client-install": "cd client && npm install",
+    "client-build": "cd client && npm run build",
+    "check-env": "node check-build.js",
     "setup-db": "node setup-database.js",
     "seed": "node seed-data.js"
   },
