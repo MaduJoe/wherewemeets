@@ -12,12 +12,12 @@
     "dev": "nodemon server.js",
     "setup-db": "node setup-database.js",
     "seed": "node seed-data.js",
-    "client-install": "cd client && npm install --legacy-peer-deps",
-    "build": "cd client && CI=false npm run build",
-    "heroku-postbuild": "npm run client-install && npm run build",
+    "build": "cd client && npm run build",
+    "heroku-postbuild": "cd client && npm install --legacy-peer-deps && npm run build",
     "client": "cd client && npm start",
     "server": "nodemon server.js"
   },
+  
   "dependencies": {
     "@google/generative-ai": "^0.24.1",
     "axios": "^1.9.0",
