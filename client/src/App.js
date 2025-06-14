@@ -22,7 +22,10 @@ import ProfilePage from './pages/ProfilePage';
 import PricingPage from './pages/PricingPage';
 
 // Stripe 설정
-const stripePromise = loadStripe(process.env.REACT_APP_STRIPE_PUBLISHABLE_KEY || 'pk_test_dummy');
+const stripePromise = loadStripe(
+  process.env.REACT_APP_STRIPE_PUBLISHABLE_KEY || 
+  'pk_test_51234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef'
+);
 
 // 로딩 스피너 컴포넌트
 const LoadingSpinner = () => (

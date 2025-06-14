@@ -6,7 +6,10 @@ import { loadStripe } from '@stripe/stripe-js';
 import axios from 'axios';
 import toast from 'react-hot-toast';
 
-const stripePromise = loadStripe(process.env.REACT_APP_STRIPE_PUBLISHABLE_KEY || 'pk_test_dummy');
+const stripePromise = loadStripe(
+  process.env.REACT_APP_STRIPE_PUBLISHABLE_KEY || 
+  'pk_test_51234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef'
+);
 
 const PricingPage = () => {
   const { user } = useAuth();
