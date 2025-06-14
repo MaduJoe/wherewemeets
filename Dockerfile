@@ -6,20 +6,21 @@ WORKDIR /app
 
 # 환경 변수 설정
 ENV NODE_ENV=production
-ENV GENERATE_SOURCEMAP=false
-ENV CI=false
 
-# 모든 파일 복사
-COPY . .
+# package.json과 package-lock.json 복사
+COPY package*.json ./
 
 # 서버 의존성 설치
 RUN npm install
 
-# 클라이언트 의존성 설치
-RUN cd client && npm install --legacy-peer-deps
-
-# 클라이언트 빌드
-RUN cd client && npm run build
+# 서버 소스 코드 복사 (클라이언트 제외)
+COPY server.js ./
+COPY routes/ ./routes/
+COPY middleware/ ./middleware/
+COPY models/ ./models/
+COPY services/ ./services/
+COPY setup-database.js ./
+COPY setup-test-users.js ./
 
 # 포트 노출
 EXPOSE 5000

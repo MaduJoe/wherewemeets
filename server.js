@@ -143,20 +143,25 @@ app.use('/api/places', placeRoutes);
 app.use('/api/subscription', subscriptionRoutes);
 app.use('/api/aiAssistant', aiAssistantRoutes);
 
-// 프로덕션에서 React 앱 서빙
-if (process.env.NODE_ENV === 'production') {
-  // React 빌드 파일 서빙
-  app.use(express.static(path.join(__dirname, 'client/build')));
-
-  // React 라우팅을 위한 catch-all handler
-  app.get('*', (req, res) => {
-    res.sendFile(path.join(__dirname, 'client/build', 'index.html'));
+// API 전용 서버 모드
+app.get('/', (req, res) => {
+  res.json({ 
+    message: 'WhereWeMeets API Server is running!',
+    version: '1.0.0',
+    endpoints: {
+      health: '/api/health',
+      test: '/api/test',
+      auth: '/api/auth',
+      meetings: '/api/meetings',
+      locations: '/api/locations',
+      payments: '/api/payments',
+      votes: '/api/votes',
+      places: '/api/places',
+      subscription: '/api/subscription',
+      aiAssistant: '/api/aiAssistant'
+    }
   });
-} else {
-  app.get('/', (req, res) => {
-    res.json({ message: 'WhereWeMeets API Server is running!' });
-  });
-}
+});
 
 // 기본 테스트 라우트
 app.get('/api/test', (req, res) => {
