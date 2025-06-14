@@ -1,22 +1,26 @@
-# 1. 환경 설정: 사용할 Node.js와 npm 버전을 지정합니다.
+# 1. 환경 설정
 [phases.setup]
 nixPkgs = ["nodejs-18_x", "npm-9_x"]
 
-# 2. 의존성 설치: 백엔드와 프론트엔드 의존성을 순서대로 설치합니다.
+# 2. 의존성 설치
 [phases.install]
 cmds = [
-  "npm install",
-  "cd client && npm install --legacy-peer-deps"
+  "npm ci",
+  "cd client && npm ci --legacy-peer-deps && cd .."
 ]
 
-# 3. 빌드: package.json에 정의된 빌드 스크립트를 실행합니다.
+# 3. 빌드
 [phases.build]
-cmds = ["npm run build"]
+cmds = [
+  "cd client && npm run build && cd ..",
+  "npm run build"
+]
 
-# 4. 시작: 최종적으로 서버를 시작합니다.
+# 4. 시작
 [start]
-cmd = "npm start"
+cmd = "node server.js"
+workdir = "/"
 
-# 5. 전역 변수: 서비스 전체에서 사용할 환경 변수를 설정합니다.
+# 5. 환경 변수
 [variables]
-NODE_ENV = "production" 
+NODE_ENV = "production"
