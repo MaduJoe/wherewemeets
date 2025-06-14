@@ -1,0 +1,21 @@
+# Git
+.git
+.gitignore
+
+# Local Environment
+.env
+.env.*
+node_modules
+client/node_modules
+npm-debug.log*
+
+# OS files
+.DS_Store
+
+# Build artifacts
+client/build
+Dockerfile
+.dockerignore
+.nixpacks
+railway.json
+README.md 
