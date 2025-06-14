@@ -3,17 +3,18 @@ nixPkgs = ["nodejs-18_x", "npm-9_x"]
 
 [phases.install]
 cmds = [
-  "npm install",
-  "cd client && npm install --legacy-peer-deps"
+  "npm install"
 ]
 
 [phases.build]
 cmds = [
-  "cd client && npm run build"
+  "cd client && GENERATE_SOURCEMAP=false CI=false npm run build"
 ]
 
 [start]
 cmd = "npm start"
 
 [variables]
-NODE_ENV = "production" 
+NODE_ENV = "production"
+GENERATE_SOURCEMAP = "false"
+CI = "false" 
