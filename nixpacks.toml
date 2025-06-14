@@ -3,14 +3,13 @@ nixPkgs = ["nodejs-18_x", "npm-9_x"]
 
 [phases.install]
 cmds = [
-  "npm ci --only=production",
-  "cd client && npm ci --legacy-peer-deps --only=production"
+  "npm install",
+  "cd client && npm install --legacy-peer-deps"
 ]
 
 [phases.build]
 cmds = [
-  "cd client && npm run build",
-  "npm run build"
+  "cd client && npm run build"
 ]
 
 [start]
