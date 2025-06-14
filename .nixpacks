@@ -1,1 +1,16 @@
 # Force Nixpacks usage 
+
+[phases.setup]
+nixPkgs = ["nodejs-18_x", "npm-9_x"]
+
+[phases.install]
+cmds = [
+  "npm install --production",
+  "cd client && npm install --legacy-peer-deps"
+]
+
+[phases.build]
+cmds = ["cd client && npm run build"]
+
+[start]
+cmd = "npm start" 
