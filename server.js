@@ -36,8 +36,8 @@ const io = socketIo(server, {
         'https://wherewemeets-client.vercel.app'
       ];
       
-      // Vercel 프리뷰 도메인 패턴 허용
-      const vercelPattern = /^https:\/\/wherewemeets-client-[a-z0-9]+-jkchos-projects\.vercel\.app$/;
+      // Vercel 프리뷰 도메인 패턴 허용 (더 포괄적인 패턴)
+      const vercelPattern = /^https:\/\/wherewemeets-client-[a-z0-9-]+-jkchos-projects\.vercel\.app$/;
       
       if (!origin || allowedOrigins.includes(origin) || vercelPattern.test(origin)) {
         callback(null, true);
@@ -113,8 +113,8 @@ app.use(cors({
       'https://wherewemeets-client.vercel.app'
     ];
     
-    // Vercel 프리뷰 도메인 패턴 허용
-    const vercelPattern = /^https:\/\/wherewemeets-client-[a-z0-9]+-jkchos-projects\.vercel\.app$/;
+    // Vercel 프리뷰 도메인 패턴 허용 (더 포괄적인 패턴)
+    const vercelPattern = /^https:\/\/wherewemeets-client-[a-z0-9-]+-jkchos-projects\.vercel\.app$/;
     
     if (!origin || allowedOrigins.includes(origin) || vercelPattern.test(origin)) {
       callback(null, true);

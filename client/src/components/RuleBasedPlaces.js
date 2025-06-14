@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import axios from 'axios';
+import api from '../utils/api';
 import { FireIcon, SparklesIcon, PlusCircleIcon, ExclamationTriangleIcon, ChevronRightIcon } from '@heroicons/react/24/outline';
 
 const PlaceCard = ({ place, onPlaceSelected, icon, badgeText, badgeColor }) => (
@@ -107,7 +107,7 @@ const RuleBasedPlaces = ({ onPlaceSelected }) => {
   // Kakao API를 통한 장소 검색
   const searchPlaces = async (query, category = '') => {
     try {
-      const response = await axios.get('/api/places/search', {
+      const response = await api.get('/places/search', {
         params: {
           query,
           category,

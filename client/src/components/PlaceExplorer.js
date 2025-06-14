@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import axios from 'axios';
+import api from '../utils/api';
 import { 
   MagnifyingGlassIcon,
   StarIcon,
@@ -51,6 +51,7 @@ const PlaceExplorer = ({ onPlaceSelected }) => {
   }, [filters]);
 
   const searchPlaces = async () => {
+    console.log('searchPlaces 함수 시작');
     setLoading(true);
     try {
       // 검색어가 없으면 카테고리별 기본 검색어 사용
@@ -68,12 +69,22 @@ const PlaceExplorer = ({ onPlaceSelected }) => {
         queryTerm = defaultQueries[filters.category] || '장소';
       }
 
-      const response = await axios.get('/api/places/search', {
+      console.log('API 요청 시작:', {
+        url: '/api/places/search',
         params: {
           category: kakaoCategoryMap[filters.category] || '',
           query: queryTerm
         }
       });
+
+      const response = await api.get('/places/search', {
+        params: {
+          category: kakaoCategoryMap[filters.category] || '',
+          query: queryTerm
+        }
+      });
+
+      console.log('API 응답 받음:', response.data);
       
       let filteredPlaces = response.data.places || [];
       
@@ -97,14 +108,19 @@ const PlaceExplorer = ({ onPlaceSelected }) => {
       });
       
       setPlaces(filteredPlaces);
+      console.log('검색 완료, 장소 개수:', filteredPlaces.length);
     } catch (error) {
       console.error('장소 검색 실패:', error);
+      console.error('에러 상세:', error.response?.data || error.message);
     } finally {
       setLoading(false);
     }
   };
 
   const handleSearch = () => {
+    console.log('검색 버튼 클릭됨');
+    console.log('검색어:', searchTerm);
+    console.log('필터:', filters);
     searchPlaces();
   };
 
@@ -123,7 +139,7 @@ const PlaceExplorer = ({ onPlaceSelected }) => {
 
   const submitReview = async (placeId) => {
     try {
-      const response = await axios.post(`/api/places/${placeId}/reviews`, {
+      const response = await api.post(`/places/${placeId}/reviews`, {
         ...newReview,
         userId: 1 // 임시 사용자 ID
       });
