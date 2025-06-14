@@ -6,6 +6,8 @@ const path = require('path');
 const http = require('http');
 const socketIo = require('socket.io');
 require('dotenv').config();
+const rateLimit = require('express-rate-limit');
+const helmet = require('helmet');
 
 // 라우트 import
 const authRoutes = require('./routes/auth');
@@ -76,9 +78,9 @@ app.set('io', io);
 
 // Middleware - CORS 설정
 app.use(cors({
-  origin: ["http://localhost:3000", "http://127.0.0.1:3000"],
-  methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
-  allowedHeaders: ["Content-Type", "Authorization"],
+  origin: process.env.NODE_ENV === 'production' 
+    ? ['https://wherewemeets.com', 'https://wherewemeets-production.up.railway.app']
+    : 'http://localhost:3000',
   credentials: true
 }));
 
@@ -132,12 +134,12 @@ app.use('/api/places', placeRoutes);
 app.use('/api/subscription', subscriptionRoutes);
 app.use('/api/aiAssistant', aiAssistantRoutes);
 
-// 프로덕션 환경에서 React 앱 서빙
+// 프로덕션에서 React 앱 서빙
 if (process.env.NODE_ENV === 'production') {
   // React 빌드 파일 서빙
   app.use(express.static(path.join(__dirname, 'client/build')));
-  
-  // 모든 요청을 React 앱으로 리다이렉트 (SPA 라우팅)
+
+  // React 라우팅을 위한 catch-all handler
   app.get('*', (req, res) => {
     res.sendFile(path.join(__dirname, 'client/build', 'index.html'));
   });
