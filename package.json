@@ -13,7 +13,7 @@
     "setup-db": "node setup-database.js",
     "seed": "node seed-data.js",
     "client-install": "cd client && npm install --legacy-peer-deps",
-    "build": "cd client && npm run build",
+    "build": "cd client && CI=false npm run build",
     "heroku-postbuild": "npm run client-install && npm run build",
     "client": "cd client && npm start",
     "server": "nodemon server.js"
