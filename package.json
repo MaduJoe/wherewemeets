@@ -10,8 +10,7 @@
   "scripts": {
     "start": "node server.js",
     "dev": "nodemon server.js",
-    "build": "cd client && npm install && npm run build",
-    "postinstall": "cd client && npm install",
+    "build": "echo 'Build handled by nixpacks'",
     "setup-db": "node setup-database.js",
     "seed": "node seed-data.js"
   },
