@@ -23,8 +23,16 @@ const app = express();
 const server = http.createServer(app);
 const io = socketIo(server, {
   cors: {
-    origin: "http://localhost:3000",
-    methods: ["GET", "POST"]
+    origin: process.env.NODE_ENV === 'production' 
+      ? [
+          'https://wherewemeets.com', 
+          'https://wherewemeets-production.up.railway.app',
+          'https://wherewemeets-client-cg7we1o8v-jkchos-projects.vercel.app',
+          'https://wherewemeets-client.vercel.app'
+        ]
+      : "http://localhost:3000",
+    methods: ["GET", "POST"],
+    credentials: true
   }
 });
 
@@ -79,7 +87,12 @@ app.set('io', io);
 // Middleware - CORS 설정
 app.use(cors({
   origin: process.env.NODE_ENV === 'production' 
-    ? ['https://wherewemeets.com', 'https://wherewemeets-production.up.railway.app']
+    ? [
+        'https://wherewemeets.com', 
+        'https://wherewemeets-production.up.railway.app',
+        'https://wherewemeets-client-cg7we1o8v-jkchos-projects.vercel.app',
+        'https://wherewemeets-client.vercel.app'
+      ]
     : 'http://localhost:3000',
   credentials: true
 }));
