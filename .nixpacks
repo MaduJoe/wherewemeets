@@ -1,25 +1,24 @@
-# 1. 환경 설정
+# Nixpacks 설정
 [phases.setup]
 nixPkgs = ["nodejs-18_x", "npm-9_x"]
 
 # 2. 의존성 설치
 [phases.install]
 cmds = [
-  "npm ci",
-  "cd client && npm ci --legacy-peer-deps && cd .."
+  "npm ci --only=production",
+  "cd client && npm ci --legacy-peer-deps --only=production"
 ]
 
 # 3. 빌드
 [phases.build]
 cmds = [
-  "cd client && npm run build && cd ..",
+  "cd client && npm run build",
   "npm run build"
 ]
 
 # 4. 시작
 [start]
-cmd = "node server.js"
-workdir = "/"
+cmd = "npm start"
 
 # 5. 환경 변수
 [variables]
