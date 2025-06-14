@@ -1,0 +1,48 @@
+{
+  "name": "wherewemeets",
+  "version": "1.0.0",
+  "description": "미팅 장소 추천 및 투표 플랫폼",
+  "main": "server.js",
+  "engines": {
+    "node": ">=18.0.0",
+    "npm": ">=8.0.0"
+  },
+  "scripts": {
+    "start": "node server.js",
+    "dev": "nodemon server.js",
+    "build": "cd client && npm install && npm run build",
+    "heroku-postbuild": "npm run build",
+    "railway-build": "npm run build",
+    "setup-db": "node setup-database.js",
+    "seed": "node seed-data.js"
+  },
+  "dependencies": {
+    "@google/generative-ai": "^0.24.1",
+    "axios": "^1.9.0",
+    "bcryptjs": "^2.4.3",
+    "body-parser": "^1.20.2",
+    "cors": "^2.8.5",
+    "dotenv": "^16.3.1",
+    "express": "^4.18.2",
+    "express-rate-limit": "^7.1.5",
+    "helmet": "^7.1.0",
+    "jsonwebtoken": "^9.0.2",
+    "mongoose": "^7.6.0",
+    "pusher": "^5.2.0",
+    "pusher-js": "^8.4.0",
+    "stripe": "^13.10.0",
+    "socket.io": "^4.8.1",
+    "socket.io-client": "^4.8.1"
+  },
+  "devDependencies": {
+    "nodemon": "^3.0.1"
+  },
+  "keywords": [
+    "meeting",
+    "location",
+    "recommendation",
+    "api"
+  ],
+  "author": "WhereWeMeets Team",
+  "license": "MIT"
+}

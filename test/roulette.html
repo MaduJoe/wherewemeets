@@ -1,0 +1,52 @@
+<!DOCTYPE html>
+<html lang="ko">
+  hello world
+<head>
+  <meta charset="UTF-8">
+  <title>룰렛 돌리기</title>
+  <!-- <script src="https://cdnjs.cloudflare.com/ajax/libs/Winwheel.js/2.7.0/Winwheel.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/gsap/3.12.2/gsap.min.js"></script> -->
+
+  <script src="https://rawcdn.githack.com/zarocknz/javascript-winwheel/2.7.0/Winwheel.min.js"></script>
+  <!-- TweenMax (GSAP v2) CDN 추가 -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/gsap/2.1.3/TweenMax.min.js"></script>
+
+  <style>
+    body { font-family: sans-serif; text-align: center; padding: 30px; }
+    canvas { margin-top: 20px; }
+    #spinButton { padding: 10px 20px; font-size: 18px; }
+  </style>
+</head>
+<body>
+  <h1>🎡 룰렛 이벤트</h1>
+  <button id="spinButton">돌리기!</button>
+  <canvas id="wheelCanvas" width="500" height="500"></canvas>
+
+  <script>
+    const theWheel = new Winwheel({
+      canvasId: 'wheelCanvas',
+      numSegments: 6,
+      segments: [
+        {'fillStyle': '#eae56f', 'text': '1등'},
+        {'fillStyle': '#89f26e', 'text': '2등'},
+        {'fillStyle': '#7de6ef', 'text': '3등'},
+        {'fillStyle': '#e7706f', 'text': '꽝'},
+        {'fillStyle': '#d3e3fc', 'text': '커피'},
+        {'fillStyle': '#ffcccb', 'text': '간식'}
+      ],
+      animation: {
+        type: 'spinToStop',
+        duration: 5,
+        spins: 8,
+        callbackFinished: function (segment) {
+          alert(`🎉 축하합니다! \"${segment.text}\" 당첨!`);
+        }
+      }
+    });
+
+    document.getElementById('spinButton').addEventListener('click', () => {
+      theWheel.startAnimation();
+    });
+  </script>
+</body>
+</html>
