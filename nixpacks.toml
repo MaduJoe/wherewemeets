@@ -1,0 +1,20 @@
+[phases.setup]
+nixPkgs = ["nodejs-18_x", "npm-9_x"]
+
+[phases.install]
+cmds = [
+  "npm ci --only=production",
+  "cd client && npm ci --legacy-peer-deps --only=production"
+]
+
+[phases.build]
+cmds = [
+  "cd client && npm run build",
+  "npm run build"
+]
+
+[start]
+cmd = "npm start"
+
+[variables]
+NODE_ENV = "production" 
