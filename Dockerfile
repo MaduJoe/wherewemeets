@@ -2,7 +2,7 @@
 FROM node:18-slim AS deps
 WORKDIR /app
 COPY package.json ./
-RUN npm ci --production
+RUN npm install --production
 
 # STAGE 2: 클라이언트 빌드 (Client Builder)
 FROM node:18-slim AS client-builder
@@ -12,7 +12,7 @@ WORKDIR /app/client
 ENV NODE_OPTIONS="--max-old-space-size=4096"
 
 COPY client/package.json ./
-RUN npm ci --legacy-peer-deps
+RUN npm install --legacy-peer-deps
 COPY client/ ./
 RUN npm run build
 
