@@ -21,7 +21,8 @@
     "autoprefixer": "^10.4.16",
     "postcss": "^8.4.31",
     "@headlessui/react": "^1.7.17",
-    "@heroicons/react": "^2.0.18"
+    "@heroicons/react": "^2.0.18",
+    "serve": "^14.2.0"
   },
   "scripts": {
     "start": "react-scripts start",
