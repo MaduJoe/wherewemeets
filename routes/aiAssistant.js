@@ -10,6 +10,7 @@ const GOOGLE_PLACES_API_KEY = process.env.GOOGLE_PLACES_API_KEY;
 // 환경변수 디버깅용 테스트 엔드포인트
 router.get('/test', (req, res) => {
   console.log('AI Assistant 테스트 엔드포인트 호출됨');
+  console.log('모든 환경변수:', Object.keys(process.env).filter(key => key.includes('GOOGLE')));
   res.json({
     success: true,
     message: 'AI Assistant API 정상 작동',
@@ -17,7 +18,9 @@ router.get('/test', (req, res) => {
       GEMINI_API_KEY: GEMINI_API_KEY ? '설정됨' : '설정안됨',
       GOOGLE_PLACES_API_KEY: GOOGLE_PLACES_API_KEY ? '설정됨' : '설정안됨',
       GOOGLE_PLACES_API_KEY_LENGTH: GOOGLE_PLACES_API_KEY ? GOOGLE_PLACES_API_KEY.length : 0,
-      NODE_ENV: process.env.NODE_ENV
+      NODE_ENV: process.env.NODE_ENV,
+      ALL_GOOGLE_VARS: Object.keys(process.env).filter(key => key.includes('GOOGLE')),
+      ALL_ENV_KEYS: Object.keys(process.env).length
     }
   });
 });
