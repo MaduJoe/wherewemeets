@@ -7,6 +7,21 @@ const router = express.Router();
 const GEMINI_API_KEY = process.env.GEMINI_API_KEY;
 const GOOGLE_PLACES_API_KEY = process.env.GOOGLE_PLACES_API_KEY;
 
+// 환경변수 디버깅용 테스트 엔드포인트
+router.get('/test', (req, res) => {
+  console.log('AI Assistant 테스트 엔드포인트 호출됨');
+  res.json({
+    success: true,
+    message: 'AI Assistant API 정상 작동',
+    environment: {
+      GEMINI_API_KEY: GEMINI_API_KEY ? '설정됨' : '설정안됨',
+      GOOGLE_PLACES_API_KEY: GOOGLE_PLACES_API_KEY ? '설정됨' : '설정안됨',
+      GOOGLE_PLACES_API_KEY_LENGTH: GOOGLE_PLACES_API_KEY ? GOOGLE_PLACES_API_KEY.length : 0,
+      NODE_ENV: process.env.NODE_ENV
+    }
+  });
+});
+
 // 사용 가능한 Gemini 모델들
 const AVAILABLE_MODELS = {
   'flash-latest': 'gemini-1.5-flash-latest',
