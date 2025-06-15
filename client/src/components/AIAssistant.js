@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect } from 'react';
-import axios from 'axios';
+import api from '../utils/api';
 import { useAuth } from '../contexts/AuthContext';
 import './AIAssistant.css';
 
@@ -122,14 +122,9 @@ const AIAssistant = ({ meetingData, onPlaceRecommendation }) => {
     setError(null);
 
     try {
-      const response = await axios.post('/api/aiAssistant/chat', {
+      const response = await api.post('/aiAssistant/chat', {
         message: userMessage.content,
         context: generateContext()
-      }, {
-        headers: {
-          'Authorization': `Bearer ${token}`,
-          'Content-Type': 'application/json'
-        }
       });
 
       if (response.data.success) {
