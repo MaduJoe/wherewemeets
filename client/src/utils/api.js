@@ -1,9 +1,9 @@
 import axios from 'axios';
 
-// API Base URL 설정
-const API_BASE_URL = process.env.NODE_ENV === 'production' 
-  ? 'https://wherewemeets-production.up.railway.app' // Railway 도메인으로 변경
-  : 'http://localhost:5000';
+// API Base URL 설정 (강제 Railway 사용)
+const API_BASE_URL = window.location.hostname === 'localhost' 
+  ? 'http://localhost:5000'
+  : 'https://wherewemeets-production.up.railway.app';
 
 // Axios 인스턴스 생성
 const api = axios.create({
@@ -13,6 +13,14 @@ const api = axios.create({
   headers: {
     'Content-Type': 'application/json',
   }
+});
+
+// 디버깅: API 설정 확인
+console.log('🚀 API 설정 확인:', {
+  hostname: window.location.hostname,
+  API_BASE_URL,
+  fullBaseURL: `${API_BASE_URL}/api`,
+  NODE_ENV: process.env.NODE_ENV
 });
 
 // 요청 인터셉터
