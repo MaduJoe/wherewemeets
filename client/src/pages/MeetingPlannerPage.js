@@ -1,6 +1,5 @@
 import React, { useState, useEffect, useLayoutEffect, useCallback, useMemo } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
-import axios from 'axios';
 import api from '../utils/api';
 import { useAuth } from '../contexts/AuthContext';
 import { 
