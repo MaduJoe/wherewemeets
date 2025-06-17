@@ -340,6 +340,11 @@ const MeetingPlannerPage = () => {
       };
 
       console.log('전송할 장소 데이터:', placeData);
+      console.log('API 설정 확인:', {
+        baseURL: api.defaults.baseURL,
+        requestURL: `/votes/${meeting.id}/candidates`,
+        fullURL: `${api.defaults.baseURL}/votes/${meeting.id}/candidates`
+      });
 
       // 투표 API를 사용하여 후보 장소 추가
       const response = await api.post(`/votes/${meeting.id}/candidates`, {
