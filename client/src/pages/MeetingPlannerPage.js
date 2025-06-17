@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useLayoutEffect, useCallback, useMemo } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import axios from 'axios';
+import api from '../utils/api';
 import { useAuth } from '../contexts/AuthContext';
 import { 
   generateRoomTokens, 
@@ -99,13 +100,13 @@ const MeetingPlannerPage = () => {
     setLoading(true);
     try {
       // DB에서 미팅 데이터 조회
-      const response = await axios.get(`/api/meetings/${id}`);
+      const response = await api.get(`/meetings/${id}`);
       
       if (response.data.success) {
         const meetingData = response.data.data.meeting;
         
         // 투표 시스템을 위한 후보 장소 데이터도 함께 로드
-        const voteResponse = await axios.get(`/api/votes/${id}`);
+        const voteResponse = await api.get(`/votes/${id}`);
         if (voteResponse.data.success) {
           meetingData.candidatePlaces = voteResponse.data.data.candidatePlaces;
         }
@@ -192,7 +193,7 @@ const MeetingPlannerPage = () => {
   // 투표 참가자 데이터 로드 함수 추가
   const fetchVoteParticipants = async (meetingId) => {
     try {
-      const response = await axios.get(`/api/votes/${meetingId}`);
+      const response = await api.get(`/votes/${meetingId}`);
       if (response.data.success) {
         const { participants } = response.data.data;
         setVoteParticipants(participants || []);
@@ -214,8 +215,8 @@ const MeetingPlannerPage = () => {
     if (!id) return;
 
     const interval = setInterval(async () => {
-      try {
-        const response = await axios.get(`/api/votes/${id}`);
+          try {
+      const response = await api.get(`/votes/${id}`);
         if (response.data.success && response.data.data.candidatePlaces) {
           const candidatePlaces = response.data.data.candidatePlaces;
           const votes = response.data.data.votes;
@@ -341,7 +342,7 @@ const MeetingPlannerPage = () => {
       console.log('전송할 장소 데이터:', placeData);
 
       // 투표 API를 사용하여 후보 장소 추가
-      const response = await axios.post(`/api/votes/${meeting.id}/candidates`, {
+      const response = await api.post(`/votes/${meeting.id}/candidates`, {
         place: placeData
       });
       
