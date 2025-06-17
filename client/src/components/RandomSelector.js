@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import axios from 'axios';
+import api from '../utils/api';
 import io from 'socket.io-client';
 import { 
   UserIcon,
@@ -12,7 +12,7 @@ import {
 class VoteService {
   async getVoteData(meetingId) {
     try {
-      const response = await axios.get(`/api/votes/${meetingId}`);
+      const response = await api.get(`/votes/${meetingId}`);
       return response.data.data;
     } catch (error) {
       console.error('투표 데이터 조회 실패:', error);
@@ -304,7 +304,10 @@ const RandomSelector = ({ meetingId, onLocationSelected }) => {
   // Socket.io 연결 설정
   useEffect(() => {
     if (meetingId) {
-      const newSocket = io('http://localhost:5000');
+      const socketUrl = window.location.hostname === 'localhost' 
+        ? 'http://localhost:5000'
+        : 'https://wherewemeets-production.up.railway.app';
+      const newSocket = io(socketUrl);
       setSocket(newSocket);
 
       // 연결 상태 이벤트
@@ -375,10 +378,10 @@ const RandomSelector = ({ meetingId, onLocationSelected }) => {
       setLoading(true);
       }
       
-      console.log(`API 호출 시작: /api/votes/${meetingId}`);
-      const response = await axios.get(`/api/votes/${meetingId}`);
+      console.log(`API 호출 시작: /votes/${meetingId}`);
+      const response = await api.get(`/votes/${meetingId}`);
       
-      const data = response.data.data;
+      const data = response.data.data || {};
       const { candidatePlaces: votesCandidatePlaces, selectionHistory: serverHistory, selectionCounts } = data;
       
       if (votesCandidatePlaces && votesCandidatePlaces.length > 0) {
@@ -583,7 +586,7 @@ const RandomSelector = ({ meetingId, onLocationSelected }) => {
   const recordSelectionOnServer = async (selectedPlace) => {
     try {
       console.log('서버에 선정 결과 저장 시작:', selectedPlace);
-      const response = await axios.post(`/api/votes/${meetingId}/selections`, {
+      const response = await api.post(`/votes/${meetingId}/selections`, {
         participantId: selectedPlace.id
       });
       console.log('서버 저장 성공:', response.data);
