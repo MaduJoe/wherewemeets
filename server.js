@@ -32,6 +32,7 @@ const io = socketIo(server, {
       // 프로덕션 환경 - 허용된 도메인 패턴
       const allowedOrigins = [
         'https://wherewemeets.com',
+        'https://www.wherewemeets.com',
         'https://wherewemeets-production.up.railway.app',
         'https://wherewemeets-client.vercel.app'
       ];
@@ -109,6 +110,7 @@ app.use(cors({
     // 프로덕션 환경 - 허용된 도메인 패턴
     const allowedOrigins = [
       'https://wherewemeets.com',
+      'https://www.wherewemeets.com',
       'https://wherewemeets-production.up.railway.app',
       'https://wherewemeets-client.vercel.app'
     ];
