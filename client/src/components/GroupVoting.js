@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useMemo } from 'react';
-import axios from 'axios';
+import api from '../utils/api';
 import { 
   HandThumbUpIcon,
   ChatBubbleLeftRightIcon,
@@ -23,7 +23,7 @@ class VoteService {
   // 투표 데이터 조회
   async getVoteData(meetingId) {
     try {
-      const response = await axios.get(`/api/votes/${meetingId}`);
+      const response = await api.get(`/votes/${meetingId}`);
       return response.data.data;
     } catch (error) {
       console.error('투표 데이터 조회 실패:', error);
@@ -34,7 +34,7 @@ class VoteService {
   // 투표하기
   async vote(meetingId, placeId, participant) {
     try {
-      const response = await axios.post(`/api/votes/${meetingId}/vote`, {
+      const response = await api.post(`/votes/${meetingId}/vote`, {
         placeId,
         participant
       });
@@ -48,7 +48,7 @@ class VoteService {
   // 참가자 등록
   async addParticipant(meetingId, participant) {
     try {
-      const response = await axios.post(`/api/votes/${meetingId}/participants`, {
+      const response = await api.post(`/votes/${meetingId}/participants`, {
         participant
       });
       return response.data.data;
@@ -61,7 +61,7 @@ class VoteService {
   // 후보 장소 추가
   async addCandidatePlace(meetingId, place) {
     try {
-      const response = await axios.post(`/api/votes/${meetingId}/candidates`, {
+      const response = await api.post(`/votes/${meetingId}/candidates`, {
         place
       });
       return response.data;
@@ -74,7 +74,7 @@ class VoteService {
   // 후보 장소 삭제
   async deleteCandidatePlace(meetingId, placeId, userId) {
     try {
-      const response = await axios.delete(`/api/votes/${meetingId}/candidates/${placeId}`, {
+      const response = await api.delete(`/votes/${meetingId}/candidates/${placeId}`, {
         data: { userId }
       });
       return response.data;
@@ -86,7 +86,7 @@ class VoteService {
 
   async updateParticipantName(meetingId, participantId, newName) {
     try {
-      const response = await axios.put(`/api/votes/${meetingId}/participant/${participantId}`, {
+      const response = await api.put(`/votes/${meetingId}/participant/${participantId}`, {
         name: newName
       });
       return response.data;
@@ -347,7 +347,7 @@ const GroupVoting = ({ meetingId, currentUserId = 1, candidatePlaces }) => {
 
   const loadMeeting = async () => {
     try {
-      const response = await axios.get(`/api/meetings/${meetingId}`);
+      const response = await api.get(`/meetings/${meetingId}`);
       setMeeting(response.data);
       
       // 감정 반응 관련 코드 제거
