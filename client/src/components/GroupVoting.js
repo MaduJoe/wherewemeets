@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import api from '../utils/api';
 import { 
   HandThumbUpIcon,
@@ -12,7 +12,11 @@ import {
   ShareIcon,
   LinkIcon,
   TrashIcon,
-  StarIcon
+  StarIcon,
+  PencilIcon,
+  ExclamationTriangleIcon,
+  TrophyIcon,
+  ClockIcon
 } from '@heroicons/react/24/outline';
 import { HandThumbUpIcon as HandThumbUpSolidIcon, HeartIcon as HeartSolidIcon } from '@heroicons/react/24/solid';
 import { useAuth } from '../contexts/AuthContext';
@@ -98,6 +102,52 @@ class VoteService {
 }
 
 const voteService = new VoteService();
+
+// 미팅 히스토리 저장 함수
+const saveMeetingHistory = async (user, meetingData) => {
+  console.log('🔍 히스토리 저장 시작 - 사용자:', user);
+  console.log('🔍 히스토리 저장 시작 - 미팅 데이터:', meetingData);
+  
+  if (!user?.id || user.isGuest) {
+    console.log('❌ 히스토리 저장 중단 - 게스트 사용자이거나 사용자 ID가 없음');
+    return;
+  }
+  
+  try {
+    const historyData = {
+      meetingId: meetingData.id,
+      title: meetingData.title || '미팅',
+      description: meetingData.description || '',
+      role: 'host', // 나중에 동적으로 결정
+      participantCount: meetingData.participants?.length || 1,
+      selectedPlace: meetingData.selectedPlace,
+      candidatePlaces: meetingData.candidatePlaces?.map(place => ({
+        id: place.id,
+        name: place.name,
+        category: place.category,
+        address: place.address,
+        rating: place.rating,
+        votes: place.votes || 0
+      })) || [],
+      totalVotes: meetingData.candidatePlaces?.reduce((sum, place) => sum + (place.votes || 0), 0) || 0,
+      selectionMethod: 'voting',
+      meetingStatus: 'completed'
+    };
+    
+    console.log('📝 저장할 히스토리 데이터:', historyData);
+    console.log('🌐 API 호출 URL:', `/api/users/${user.id}/history`);
+    
+    const response = await api.post(`/api/users/${user.id}/history`, historyData);
+    
+    console.log('✅ 미팅 히스토리 저장 성공:', response.data);
+    return response.data;
+  } catch (error) {
+    console.error('❌ 미팅 히스토리 저장 실패:', error);
+    console.error('❌ 에러 응답:', error.response?.data);
+    console.error('❌ 에러 상태:', error.response?.status);
+    throw error;
+  }
+};
 
 const GroupVoting = ({ meetingId, currentUserId = 1, candidatePlaces }) => {
   const { user } = useAuth();
@@ -548,6 +598,95 @@ const GroupVoting = ({ meetingId, currentUserId = 1, candidatePlaces }) => {
     return allVoters;
   };
 
+  // 최고 득표 장소 찾기
+  const getWinningPlace = () => {
+    if (!meeting?.candidatePlaces || meeting.candidatePlaces.length === 0) return null;
+    
+    let maxVotes = -1;
+    let winningPlaces = [];
+    
+    meeting.candidatePlaces.forEach(place => {
+      const votes = place.votes || 0;
+      if (votes > maxVotes) {
+        maxVotes = votes;
+        winningPlaces = [place];
+      } else if (votes === maxVotes && votes > 0) {
+        winningPlaces.push(place);
+      }
+    });
+    
+    return winningPlaces.length > 0 ? { places: winningPlaces, votes: maxVotes } : null;
+  };
+
+  // 투표 결과 확정
+  const handleConfirmResult = async () => {
+    const winningResult = getWinningPlace();
+    
+    if (!winningResult || winningResult.places.length === 0) {
+      alert('아직 투표가 진행되지 않았습니다.');
+      return;
+    }
+
+    let selectedPlace = null;
+    
+    if (winningResult.places.length === 1) {
+      selectedPlace = winningResult.places[0];
+    } else {
+      // 동점인 경우 사용자가 선택
+      const placeNames = winningResult.places.map((place, index) => `${index + 1}. ${place.name}`).join('\n');
+      const choice = window.prompt(
+        `동점 장소가 ${winningResult.places.length}개 있습니다. 최종 장소를 선택해주세요:\n\n${placeNames}\n\n번호를 입력하세요 (1-${winningResult.places.length}):`
+      );
+      
+      const choiceNum = parseInt(choice);
+      if (choiceNum >= 1 && choiceNum <= winningResult.places.length) {
+        selectedPlace = winningResult.places[choiceNum - 1];
+      } else {
+        alert('잘못된 선택입니다.');
+        return;
+      }
+    }
+
+    if (!selectedPlace) return;
+
+    try {
+      // 미팅 정보 업데이트
+      const updatedMeeting = {
+        ...meeting,
+        selectedPlace: {
+          id: selectedPlace.id,
+          name: selectedPlace.name,
+          category: selectedPlace.category,
+          address: selectedPlace.address,
+          rating: selectedPlace.rating,
+          coordinates: selectedPlace.coordinates
+        },
+        selectionMethod: 'voting',
+        meetingStatus: 'completed',
+        participants: participants
+      };
+
+      setMeeting(updatedMeeting);
+
+      // 히스토리에 저장 (로그인 사용자만)
+      if (user && !user.isGuest) {
+        try {
+          await saveMeetingHistory(user, updatedMeeting);
+          alert(`🎉 ${selectedPlace.name}이(가) 최종 장소로 선정되었습니다!\n\n✅ 미팅 히스토리에 저장되었습니다.`);
+        } catch (historyError) {
+          console.error('히스토리 저장 실패:', historyError);
+          alert(`🎉 ${selectedPlace.name}이(가) 최종 장소로 선정되었습니다!\n\n⚠️ 히스토리 저장에 실패했습니다. 대시보드에서 확인해주세요.`);
+        }
+      } else {
+        alert(`🎉 ${selectedPlace.name}이(가) 최종 장소로 선정되었습니다!`);
+      }
+      
+    } catch (error) {
+      console.error('최종 장소 선정 처리 실패:', error);
+      alert(`🎉 ${selectedPlace.name}이(가) 최종 장소로 선정되었습니다!`);
+    }
+  };
+
   if (!meeting) {
     return (
       <div className="bg-white rounded-lg shadow p-6">
@@ -633,8 +772,19 @@ const GroupVoting = ({ meetingId, currentUserId = 1, candidatePlaces }) => {
                 <HandThumbUpIcon className="h-6 w-6 text-primary-600 mr-2" />
                 <h3 className="text-lg font-semibold text-gray-900">장소 투표</h3>
               </div>
-              <div className="text-sm text-gray-600">
-                {getUniqueVoters().size}명이 투표에 참여했습니다
+              <div className="flex items-center gap-4">
+                <div className="text-sm text-gray-600">
+                  {getUniqueVoters().size}명이 투표에 참여했습니다
+                </div>
+                {isOwner && getUniqueVoters().size > 0 && (
+                  <button
+                    onClick={handleConfirmResult}
+                    className="bg-gradient-to-r from-yellow-500 to-orange-500 hover:from-yellow-600 hover:to-orange-600 text-white px-4 py-2 rounded-lg text-sm font-medium transition-all duration-200 flex items-center gap-2 shadow-md"
+                  >
+                    <TrophyIcon className="h-4 w-4" />
+                    결과 확정
+                  </button>
+                )}
               </div>
             </div>
 

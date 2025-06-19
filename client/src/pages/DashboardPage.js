@@ -10,9 +10,11 @@ import {
   CheckIcon,
   XMarkIcon,
   EyeIcon,
-  LockClosedIcon
+  LockClosedIcon,
+  DocumentTextIcon
 } from '@heroicons/react/24/outline';
 import { toast } from 'react-hot-toast';
+import MeetingHistory from '../components/MeetingHistory';
 
 const DashboardPage = () => {
   const { user, logout, isAuthenticated, updateProfile, changePassword, getDashboardData } = useAuth();
@@ -221,6 +223,7 @@ const DashboardPage = () => {
             <nav className="flex space-x-8 px-6">
               {[
                 { id: 'overview', name: '개요', icon: ChartBarIcon },
+                { id: 'history', name: '미팅 히스토리', icon: DocumentTextIcon },
                 { id: 'profile', name: '프로필 관리', icon: UserIcon },
                 { id: 'settings', name: '설정', icon: CogIcon },
                 { id: 'security', name: '보안', icon: LockClosedIcon }
@@ -322,6 +325,12 @@ const DashboardPage = () => {
                 </div>
               </div>
             </>
+          )}
+
+          {activeTab === 'history' && (
+            <div className="lg:col-span-3">
+              <MeetingHistory />
+            </div>
           )}
 
           {activeTab === 'profile' && (
