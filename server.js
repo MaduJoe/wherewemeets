@@ -18,6 +18,7 @@ const voteRoutes = require('./routes/votes');
 const placeRoutes = require('./routes/placeRoutes');
 const subscriptionRoutes = require('./routes/subscription');
 const aiAssistantRoutes = require('./routes/aiAssistant');
+const userHistoryRoutes = require('./routes/userHistory');
 
 const app = express();
 const server = http.createServer(app);
@@ -185,6 +186,7 @@ app.use('/api/votes', voteRoutes);
 app.use('/api/places', placeRoutes);
 app.use('/api/subscription', subscriptionRoutes);
 app.use('/api/aiAssistant', aiAssistantRoutes);
+app.use('/api/users', userHistoryRoutes);
 
 // API 전용 서버 모드
 app.get('/', (req, res) => {
@@ -201,7 +203,8 @@ app.get('/', (req, res) => {
       votes: '/api/votes',
       places: '/api/places',
       subscription: '/api/subscription',
-      aiAssistant: '/api/aiAssistant'
+      aiAssistant: '/api/aiAssistant',
+      userHistory: '/api/users'
     }
   });
 });

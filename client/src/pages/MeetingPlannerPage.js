@@ -22,6 +22,38 @@ import {
 } from '@heroicons/react/24/outline';
 import PlaceExplorer from '../components/PlaceExplorer';
 
+// 미팅 히스토리 저장 함수
+const saveMeetingHistory = async (user, meetingData) => {
+  if (!user?.id || user.isGuest) return; // 게스트는 히스토리 저장 안함
+  
+  try {
+    const historyData = {
+      meetingId: meetingData.id,
+      title: meetingData.title || '미팅',
+      description: meetingData.description || '',
+      role: 'host', // 나중에 동적으로 결정
+      participantCount: meetingData.participants?.length || 1,
+      selectedPlace: meetingData.selectedPlace,
+      candidatePlaces: meetingData.candidatePlaces?.map(place => ({
+        id: place.id,
+        name: place.name,
+        category: place.category,
+        address: place.address,
+        rating: place.rating,
+        votes: place.votes || 0
+      })) || [],
+      totalVotes: meetingData.candidatePlaces?.reduce((sum, place) => sum + (place.votes || 0), 0) || 0,
+      selectionMethod: meetingData.selectionMethod || 'voting',
+      meetingStatus: 'planning'
+    };
+    
+    await api.post(`/api/users/${user.id}/history`, historyData);
+    console.log('미팅 히스토리 저장 완료');
+  } catch (error) {
+    console.error('미팅 히스토리 저장 실패:', error);
+  }
+};
+
 const MeetingPlannerPage = () => {
   const { id } = useParams();
   const navigate = useNavigate();
@@ -112,28 +144,24 @@ const MeetingPlannerPage = () => {
         
         setMeeting(meetingData);
       } else {
-        // 미팅을 찾을 수 없으면 더미 데이터 사용
-        console.log('미팅을 찾을 수 없음, 더미 데이터 사용');
+        // 미팅을 찾을 수 없으면 기본 구조만 생성
+        console.log('미팅을 찾을 수 없음, 기본 구조 생성');
         
         const isSharedMeeting = id.startsWith('shared-');
         const meetingTitle = isSharedMeeting ? '공유된 미팅' : 
-                            (user && !user.isGuest) ? `${user.name}님의 미팅` : '나의 미팅';
+                            (user && !user.isGuest) ? `${user.name}님의 미팅` : '새 미팅';
         
-        const dummyMeeting = {
+        const newMeeting = {
           id: id,
           title: meetingTitle,
           description: isSharedMeeting ? '공유 링크를 통해 참여한 미팅입니다' : '장소를 선택하고 친구들과 투표해보세요',
           category: 'restaurant',
-          participants: [
-            { id: 1, name: '김철수', location: '강남구' },
-            { id: 2, name: '이영희', location: '홍대입구' },
-            { id: 3, name: '박민수', location: '잠실' }
-          ],
+          participants: [],
           candidatePlaces: [],
           status: 'planning'
         };
         
-        setMeeting(dummyMeeting);
+        setMeeting(newMeeting);
       }
     } catch (error) {
       // 401 에러는 인증 문제이므로 로그만 남기고 더미 데이터 사용
@@ -142,37 +170,19 @@ const MeetingPlannerPage = () => {
       } else {
         console.error('미팅 로드 실패:', error);
       }
-      // API 호출 실패 시 더미 데이터로 폴백
-      setMeeting({
-        id: id || 'demo-meeting-001',
-        title: '친구들과 저녁 식사',
-        description: '오랜만에 모이는 친구들과의 식사',
+      
+      // API 호출 실패 시 빈 미팅 구조 생성
+      const fallbackMeeting = {
+        id: id || `meeting-${Date.now()}`,
+        title: (user && !user.isGuest) ? `${user.name}님의 미팅` : '새 미팅',
+        description: '장소를 선택하고 친구들과 투표해보세요',
         category: 'restaurant',
-        participants: [
-          { id: 1, name: '김철수', location: '강남구' },
-          { id: 2, name: '이영희', location: '홍대입구' },
-          { id: 3, name: '박민수', location: '잠실' }
-        ],
-        candidatePlaces: [
-          {
-            id: 'demo-place-1',
-            name: '맛있는 한식당',
-            category: '한식',
-            reason: '모든 참가자가 좋아하는 메뉴',
-            votes: 0,
-            voters: []
-          },
-          {
-            id: 'demo-place-2', 
-            name: '분위기 좋은 이탈리안',
-            category: '양식',
-            reason: '중간 지점에 위치',
-            votes: 0,
-            voters: []
-          }
-        ],
+        participants: [],
+        candidatePlaces: [],
         status: 'planning'
-      });
+      };
+      
+      setMeeting(fallbackMeeting);
     } finally {
       setLoading(false);
     }
@@ -371,9 +381,36 @@ const MeetingPlannerPage = () => {
     }
   };
 
-  const handleLocationSelected = (location) => {
-    alert(`${location.name}이(가) 최종 장소로 선정되었습니다!`);
-    // 실제로는 미팅의 최종 장소를 업데이트하는 API 호출
+  const handleLocationSelected = async (location) => {
+    try {
+      // 최종 장소로 선정된 정보를 미팅에 저장
+      const updatedMeeting = {
+        ...meeting,
+        selectedPlace: {
+          id: location.id,
+          name: location.name,
+          category: location.category,
+          address: location.address,
+          rating: location.rating,
+          coordinates: location.coordinates
+        },
+        selectionMethod: 'voting', // 투표로 선정됨
+        meetingStatus: 'completed'
+      };
+      
+      setMeeting(updatedMeeting);
+      
+      // 히스토리에 저장 (로그인 사용자만)
+      if (user && !user.isGuest) {
+        await saveMeetingHistory(user, updatedMeeting);
+      }
+      
+      alert(`${location.name}이(가) 최종 장소로 선정되었습니다!`);
+      
+    } catch (error) {
+      console.error('최종 장소 선정 처리 실패:', error);
+      alert(`${location.name}이(가) 최종 장소로 선정되었습니다!`);
+    }
   };
 
   // 토큰 기반 주최자 여부 확인
