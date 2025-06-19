@@ -114,7 +114,10 @@
       - [ ] 구독 플랜에 따른 기능 제한 확인 (필요시)
 
    🐛 **발견된 문제점들:**
-   (테스트 진행하면서 발견되는 문제점들을 여기에 기록)
+   - ✅ Vercel 빌드 실패: Node.js 버전 22.x → 18.x 오류
+     * 해결: vercel.json과 package.json에 Node.js 18.x 버전 명시
+     * 수정 파일: client/vercel.json, vercel.json, client/package.json
+     * 배포 완료: commit으로 수정사항 반영
 
    ⚡ **해결할 사항들:**
    (테스트 중 발견된 버그나 개선사항들을 여기에 기록)

@@ -1,14 +1,6 @@
 {
   "name": "wherewemeets-client",
   "version": 2,
-  "functions": {
-    "app/api/**/*.js": {
-      "runtime": "nodejs18.x"
-    }
-  },
-  "env": {
-    "NODE_VERSION": "18"
-  },
   "builds": [
     {
       "src": "client/package.json",
