@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { useAuth } from '../contexts/AuthContext';
 import api from '../utils/api';
 import './MeetingHistory.css';
@@ -21,6 +21,7 @@ const MeetingHistory = () => {
       fetchHistory();
       fetchStats();
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [user, filter, pagination.currentPage]);
 
   // 미팅 히스토리 조회
