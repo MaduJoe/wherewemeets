@@ -47,7 +47,7 @@ const saveMeetingHistory = async (user, meetingData) => {
       meetingStatus: 'planning'
     };
     
-    await api.post(`/api/users/${user.id}/history`, historyData);
+    await api.post(`/users/${user.id}/history`, historyData);
     console.log('미팅 히스토리 저장 완료');
   } catch (error) {
     console.error('미팅 히스토리 저장 실패:', error);

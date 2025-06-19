@@ -135,9 +135,9 @@ const saveMeetingHistory = async (user, meetingData) => {
     };
     
     console.log('📝 저장할 히스토리 데이터:', historyData);
-    console.log('🌐 API 호출 URL:', `/api/users/${user.id}/history`);
+    console.log('🌐 API 호출 URL:', `/users/${user.id}/history`);
     
-    const response = await api.post(`/api/users/${user.id}/history`, historyData);
+    const response = await api.post(`/users/${user.id}/history`, historyData);
     
     console.log('✅ 미팅 히스토리 저장 성공:', response.data);
     return response.data;

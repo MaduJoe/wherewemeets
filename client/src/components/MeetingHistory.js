@@ -36,7 +36,7 @@ const MeetingHistory = () => {
         ...filter
       };
       
-      const response = await api.get(`/api/users/${user.id}/history`, { params });
+      const response = await api.get(`/users/${user.id}/history`, { params });
       
       if (response.data.success) {
         setHistory(response.data.data.history);
@@ -54,7 +54,7 @@ const MeetingHistory = () => {
     if (!user?.id) return;
     
     try {
-      const response = await api.get(`/api/users/${user.id}/stats`);
+      const response = await api.get(`/users/${user.id}/stats`);
       
       if (response.data.success) {
         setStats(response.data.data);
@@ -67,7 +67,7 @@ const MeetingHistory = () => {
   // 미팅 상태 변경
   const updateMeetingStatus = async (meetingId, status, notes = '') => {
     try {
-      const response = await api.patch(`/api/users/${user.id}/history/${meetingId}/status`, {
+      const response = await api.patch(`/users/${user.id}/history/${meetingId}/status`, {
         status,
         notes
       });
@@ -88,7 +88,7 @@ const MeetingHistory = () => {
     if (!window.confirm('이 미팅 기록을 삭제하시겠습니까?')) return;
     
     try {
-      const response = await api.delete(`/api/users/${user.id}/history/${meetingId}`);
+      const response = await api.delete(`/users/${user.id}/history/${meetingId}`);
       
       if (response.data.success) {
         fetchHistory();
