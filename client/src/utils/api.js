@@ -40,8 +40,10 @@ api.interceptors.response.use(
   (response) => response,
   (error) => {
     if (error.response?.status === 401) {
+      // 토큰만 제거하고 게스트 모드 유지 (강제 리다이렉트 제거)
       localStorage.removeItem('token');
-      window.location.href = '/login';
+      console.log('401 에러 발생 - 토큰 제거됨, 게스트 모드 유지');
+      // window.location.href = '/login'; // 이 라인을 제거!
     }
     return Promise.reject(error);
   }

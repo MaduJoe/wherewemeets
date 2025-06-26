@@ -15,6 +15,7 @@ import {
 } from '@heroicons/react/24/outline';
 import { toast } from 'react-hot-toast';
 import MeetingHistory from '../components/MeetingHistory';
+import PremiumOnly from '../components/PremiumOnly';
 
 const DashboardPage = () => {
   const { user, logout, isAuthenticated, updateProfile, changePassword, getDashboardData } = useAuth();
@@ -52,12 +53,20 @@ const DashboardPage = () => {
   });
 
   useEffect(() => {
+    // 인증되지 않은 사용자는 로그인 페이지로
     if (!isAuthenticated) {
       navigate('/login');
       return;
     }
+    
+    // 게스트 사용자나 무료 사용자는 대시보드 접근 불가
+    if (user?.isGuest || user?.subscription !== 'premium') {
+      // PremiumOnly 컴포넌트에서 처리하므로 리다이렉트하지 않음
+      return;
+    }
+
     loadDashboardData();
-  }, [isAuthenticated, navigate]);
+  }, [isAuthenticated, user, navigate]);
 
   useEffect(() => {
     if (user) {
@@ -181,6 +190,11 @@ const DashboardPage = () => {
       }
     }));
   };
+
+  // 게스트 사용자나 무료 사용자는 PremiumOnly 컴포넌트 표시
+  if (user?.isGuest || user?.subscription !== 'premium') {
+    return <PremiumOnly feature="대시보드" />;
+  }
 
   if (loading) {
     return (

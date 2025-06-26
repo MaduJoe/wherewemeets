@@ -121,6 +121,10 @@ const UserSchema = new mongoose.Schema({
         default: Date.now
       }
     }],
+    aiRecommendationUsage: {
+      type: Number,
+      default: 0
+    },
     loginHistory: [{
       timestamp: {
         type: Date,
@@ -218,6 +222,33 @@ UserSchema.methods.incrementVoteCount = function() {
   this.analytics.totalVotes += 1;
   this.analytics.lastActivity = new Date();
   return this.save();
+};
+
+// AI 추천 사용 횟수 증가
+UserSchema.methods.incrementAIRecommendationUsage = function() {
+  this.analytics.aiRecommendationUsage += 1;
+  this.analytics.lastActivity = new Date();
+  return this.save();
+};
+
+// AI 추천 사용 가능 여부 확인
+UserSchema.methods.canUseAIRecommendation = function() {
+  // 프리미엄 사용자는 무제한
+  if (this.subscription === 'premium' || this.subscription === 'pro') {
+    return { canUse: true, remaining: 'unlimited' };
+  }
+  
+  // 게스트/무료 사용자는 5회 제한
+  const used = this.analytics.aiRecommendationUsage || 0;
+  const limit = 5;
+  const remaining = Math.max(0, limit - used);
+  
+  return {
+    canUse: remaining > 0,
+    remaining: remaining,
+    limit: limit,
+    used: used
+  };
 };
 
 module.exports = mongoose.model('User', UserSchema); 

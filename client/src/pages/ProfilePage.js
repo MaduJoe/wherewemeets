@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { useAuth } from '../contexts/AuthContext';
 import MeetingHistory from '../components/MeetingHistory';
+import { formatDate } from '../utils/dateUtils';
 
 const ProfilePage = () => {
   const { user } = useAuth();
@@ -55,6 +56,13 @@ const ProfilePage = () => {
                 <label className="block text-sm font-medium text-gray-700">구독 플랜</label>
                 <p className="mt-1 text-sm text-gray-900">{user?.subscription || 'Free'}</p>
               </div>
+              
+              {user?.createdAt && (
+                <div>
+                  <label className="block text-sm font-medium text-gray-700">가입일</label>
+                  <p className="mt-1 text-sm text-gray-900">{formatDate(user.createdAt)}</p>
+                </div>
+              )}
             </div>
 
             <div className="mt-6 p-4 bg-gray-100 rounded-lg">

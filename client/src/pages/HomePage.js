@@ -73,7 +73,7 @@ const HomePage = () => {
               를 찾아보세요
             </h1>
             <p className="text-xl text-gray-600 mb-8 max-w-3xl mx-auto leading-relaxed">
-              AI가 분석하는 지능형 추천부터 공정한 랜덤 선정까지, 
+              AI가 분석하는 지능형 추천부터 공정한 랜덤 선정까지,<br/>
               모든 친구가 만족하는 만남의 장소를 쉽고 재미있게 결정하세요
             </p>
             
@@ -85,42 +85,54 @@ const HomePage = () => {
                 className="bg-gradient-to-r from-primary-600 to-secondary-600 text-white px-8 py-4 rounded-full text-lg font-semibold hover:from-primary-700 hover:to-secondary-700 transition duration-200 transform hover:scale-105 shadow-lg flex items-center"
               >
                 <PlayIcon className="h-8 w-8 mr-4" />
-                지금 무료로 시작하기
+                {isAuthenticated && user?.subscription === 'premium' 
+                  ? '나만의 AI 미팅 만들기' 
+                  : '지금 무료로 시작하기'
+                }
               </Link>
             </div>
 
             {/* 로그인/회원가입 버튼 섹션 */}
-            {!isAuthenticated ? (
+            {!isAuthenticated || user?.isGuest ? (
               <div className="mb-8">
                 <div className="flex flex-col sm:flex-row gap-3 justify-center items-center">
-                  {/* <Link
-                    to="/register"
+                  <Link
+                    to="/login"
                     className="bg-white text-primary-600 border-2 border-primary-600 px-6 py-3 rounded-full font-semibold hover:bg-primary-50 transition duration-200 transform hover:scale-105 shadow-md"
                   >
-                    회원가입
-                  </Link> */}
-                  {/* <Link
-                    to="/login"
+                    로그인
+                  </Link>
+                  <Link
+                    to="/register"
                     className="text-gray-600 hover:text-primary-600 px-6 py-3 rounded-full font-medium transition duration-200"
                   >
-                    로그인
-                  </Link> */}
+                    회원가입
+                  </Link>
                 </div>
                 <p className="text-center text-sm text-gray-500 mt-3">
-                  로그인 없이도 모든 기능을 체험할 수 있습니다
+                  {user?.isGuest 
+                    ? '게스트 모드입니다. 로그인하면 더 많은 기능을 이용할 수 있어요!'
+                    : '로그인 없이도 모든 기능을 체험할 수 있습니다'
+                  }
                 </p>
               </div>
             ) : (
               <div className="mb-8">
                 <p className="text-green-600 font-medium mb-4">
-                  🎉 {user.name}님, 환영합니다! 모든 프리미엄 기능을 이용하세요
+                  🎉 {user.name}님, 환영합니다! 
+                  {user.subscription === 'premium' 
+                    ? '모든 프리미엄 기능을 이용하세요' 
+                    : '더 많은 기능을 이용하려면 프리미엄을 구독하세요'
+                  }
                 </p>
-                <Link
-                  to="/dashboard"
-                  className="bg-gradient-to-r from-green-500 to-blue-500 text-white px-6 py-3 rounded-full font-semibold hover:from-green-600 hover:to-blue-600 transition duration-200 transform hover:scale-105 shadow-md"
-                >
-                  내 대시보드로 이동
-                </Link>
+                {/* {user.subscription === 'premium' && (
+                  <Link
+                    to="/dashboard"
+                    className="bg-gradient-to-r from-green-500 to-blue-500 text-white px-6 py-3 rounded-full font-semibold hover:from-green-600 hover:to-blue-600 transition duration-200 transform hover:scale-105 shadow-md"
+                  >
+                    내 대시보드로 이동
+                  </Link>
+                )} */}
               </div>
             )}
 
@@ -403,7 +415,10 @@ const HomePage = () => {
               to="/meeting-planner"
               className="bg-white text-primary-600 px-8 py-4 rounded-full text-lg font-semibold hover:bg-gray-100 transition duration-200 transform hover:scale-105"
             >
-              무료로 시작하기 🚀
+              {isAuthenticated && user?.subscription === 'premium' 
+                ? '나만의 AI 미팅 만들기 🚀' 
+                : '무료로 시작하기 🚀'
+              }
             </Link>
             <button
               onClick={() => {

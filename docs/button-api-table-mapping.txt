@@ -1,0 +1,331 @@
+===============================================================================
+                    WhereWeMeets 버튼 → API → 테이블 매핑 분석
+===============================================================================
+
+📅 작성일: 2024년
+🔍 분석 목적: 프론트엔드 버튼 클릭 시 호출되는 API와 데이터 저장 테이블 관계 파악
+📊 데이터베이스: MongoDB (컬렉션 기반)
+
+===============================================================================
+                           1. 로그인/회원가입 관련
+===============================================================================
+
+🔐 **회원가입 버튼**
+   📍 위치: client/src/pages/RegisterPage.js → handleSubmit()
+   🌐 API: POST /auth/register
+   📊 테이블: User 컬렉션
+   💾 저장 데이터:
+      - name, email, password (bcrypt 해싱)
+      - subscription: 'premium' (기본값)
+      - analytics.loginHistory[] (로그인 기록 배열)
+      - socialLogin.provider: 'local'
+      - createdAt, updatedAt
+
+🔐 **로그인 버튼**
+   📍 위치: client/src/pages/LoginPage.js → handleSubmit()
+   🌐 API: POST /auth/login
+   📊 테이블: User 컬렉션 (기존 사용자 업데이트)
+   💾 저장 데이터:
+      - analytics.loginHistory[] 에 새 로그인 기록 추가
+      - analytics.lastActivity 업데이트
+
+🔐 **소셜 로그인 버튼**
+   📍 위치: client/src/pages/LoginPage.js → handleSocialLogin()
+   🌐 API: POST /auth/social-login
+   📊 테이블: User 컬렉션
+   💾 저장 데이터:
+      - 신규: 전체 사용자 정보 + socialLogin 정보
+      - 기존: socialLogin.provider, socialLogin.providerId 업데이트
+
+===============================================================================
+                              2. 투표 시스템 관련
+===============================================================================
+
+🗳️ **투표하기 버튼**
+   📍 위치: client/src/components/GroupVoting.js → handleVote()
+   🌐 API: POST /votes/:meetingId/vote
+   📊 테이블: Vote 컬렉션
+   💾 저장 데이터:
+      - meetingId (String, 인덱스)
+      - placeId (String)
+      - placeName (String)
+      - voter: { id, name, email }
+      - votedAt (Date)
+   🔄 특이사항: 
+      - 기존 투표 있으면 업데이트/삭제
+      - 복합 인덱스: meetingId + voter.id (unique)
+
+👥 **참가자 등록 버튼**
+   📍 위치: client/src/components/GroupVoting.js → handleJoinMeeting()
+   🌐 API: POST /votes/:meetingId/participants
+   📊 테이블: 별도 테이블 없음 (투표 시스템에서 관리)
+   💾 저장 데이터: localStorage + 메모리 관리
+
+📍 **후보 장소 추가 버튼**
+   📍 위치: client/src/pages/MeetingPlannerPage.js → handlePlaceSelected()
+   🌐 API: POST /votes/:meetingId/candidates
+   📊 테이블: CandidatePlace 컬렉션
+   💾 저장 데이터:
+      - meetingId (String, 인덱스)
+      - placeId (String)
+      - name, category, address
+      - coordinates: { lat, lng }
+      - rating, photos[], additionalInfo
+      - addedBy: { id, name, email }
+      - addedAt (Date)
+   🔄 특이사항: 복합 인덱스 meetingId + placeId (unique)
+
+🗑️ **후보 장소 삭제 버튼**
+   📍 위치: client/src/components/GroupVoting.js → handleDeletePlace()
+   🌐 API: DELETE /votes/:meetingId/candidates/:placeId
+   📊 테이블: CandidatePlace 컬렉션
+   💾 데이터 변경: 해당 문서 삭제
+
+===============================================================================
+                            3. 미팅 히스토리 관련
+===============================================================================
+
+✅ **결과 확정 버튼**
+   📍 위치: client/src/components/GroupVoting.js → handleConfirmResult()
+   🌐 API: POST /users/:userId/history
+   📊 테이블: UserMeetingHistory 컬렉션
+   💾 저장 데이터:
+      - userId (String, 인덱스)
+      - meetingId (String)
+      - title, description
+      - role: 'host' | 'participant'
+      - participantCount (Number)
+      - selectedPlace: { id, name, category, address, rating, coordinates }
+      - candidatePlaces[]: { id, name, category, address, rating, votes }
+      - totalVotes, selectionMethod: 'voting'
+      - meetingStatus: 'completed'
+      - createdAt, completedAt
+   🔄 특이사항: upsert 방식 (userId + meetingId unique)
+
+🔄 **미팅 상태 변경 버튼**
+   📍 위치: client/src/components/MeetingHistory.js → updateMeetingStatus()
+   🌐 API: PATCH /users/:userId/history/:meetingId/status
+   📊 테이블: UserMeetingHistory 컬렉션
+   💾 데이터 변경:
+      - meetingStatus: 'planning' | 'completed' | 'cancelled'
+      - completedAt (completed 시)
+      - notes (옵션)
+
+🗑️ **미팅 삭제 버튼**
+   📍 위치: client/src/components/MeetingHistory.js → deleteMeeting()
+   🌐 API: DELETE /users/:userId/history/:meetingId
+   📊 테이블: UserMeetingHistory 컬렉션
+   💾 데이터 변경: 해당 문서 삭제
+
+📊 **히스토리 조회**
+   📍 위치: client/src/components/MeetingHistory.js → fetchHistory()
+   🌐 API: GET /users/:userId/history
+   📊 테이블: UserMeetingHistory 컬렉션 (읽기 전용)
+   💾 데이터 변경: 없음 (조회만)
+
+📈 **통계 조회**
+   📍 위치: client/src/components/MeetingHistory.js → fetchStats()
+   🌐 API: GET /users/:userId/stats
+   📊 테이블: UserMeetingHistory 컬렉션 (집계 쿼리)
+   💾 데이터 변경: 없음 (집계 결과 반환)
+
+===============================================================================
+                             4. 미팅 관리 관련
+===============================================================================
+
+📝 **미팅 생성 버튼** (아직 프론트엔드 미구현)
+   📍 위치: 미구현
+   🌐 API: POST /meetings
+   📊 테이블: Meeting 컬렉션
+   💾 저장 데이터:
+      - title, description
+      - organizer (ObjectId → User)
+      - scheduledDate
+      - participants[]: { user, location, preferences, status }
+      - status: 'planning'
+
+🎯 **최종 장소 선택 버튼** (아직 프론트엔드 미구현)
+   📍 위치: 미구현
+   🌐 API: PUT /meetings/:id/select-location
+   📊 테이블: Meeting 컬렉션
+   💾 데이터 변경:
+      - selectedLocation: { name, address, coordinates, googlePlaceId }
+      - status: 'confirmed'
+
+🗺️ **장소 추천 생성 버튼** (아직 프론트엔드 미구현)
+   📍 위치: 미구현
+   🌐 API: POST /meetings/:id/suggest-locations
+   📊 테이블: Meeting 컬렉션
+   💾 데이터 변경:
+      - suggestedLocations[] 배열 업데이트
+
+===============================================================================
+                           5. 데이터베이스 컬렉션 구조
+===============================================================================
+
+📊 **User 컬렉션** (사용자 정보)
+   🔑 주요 필드:
+      - _id (ObjectId, 자동 생성)
+      - name, email, password
+      - subscription ('free' | 'premium' | 'pro')
+      - socialLogin: { provider, providerId }
+      - preferences: { transportMode, preferredCategories, maxDistance }
+      - analytics: { totalMeetings, totalVotes, loginHistory, featureUsage }
+   📈 인덱스: email (unique)
+
+🗳️ **Vote 컬렉션** (투표 데이터)
+   🔑 주요 필드:
+      - meetingId (String)
+      - placeId, placeName
+      - voter: { id, name, email }
+      - votedAt
+   📈 인덱스: 
+      - meetingId
+      - meetingId + voter.id (unique)
+
+📍 **CandidatePlace 컬렉션** (후보 장소)
+   🔑 주요 필드:
+      - meetingId (String)
+      - placeId, name, category, address
+      - coordinates: { lat, lng }
+      - rating, photos[], additionalInfo
+      - addedBy: { id, name, email }
+   📈 인덱스:
+      - meetingId
+      - meetingId + placeId (unique)
+
+📝 **Meeting 컬렉션** (미팅 정보)
+   🔑 주요 필드:
+      - organizer (ObjectId → User)
+      - participants[]: { user, location, preferences, status }
+      - suggestedLocations[], selectedLocation
+      - scheduledDate, status
+   📈 인덱스: organizer, participants.user
+
+📈 **UserMeetingHistory 컬렉션** (사용자 미팅 히스토리)
+   🔑 주요 필드:
+      - userId (String)
+      - meetingId, title, description, role
+      - selectedPlace, candidatePlaces[]
+      - meetingStatus, selectionMethod
+      - participantCount, totalVotes
+   📈 인덱스:
+      - userId
+      - userId + createdAt
+      - userId + meetingId (unique)
+
+🎯 **SelectionEvent 컬렉션** (선정 이벤트)
+   🔑 주요 필드:
+      - meetingId (String)
+      - participantId, participantName
+      - selectedAt
+   📈 인덱스: meetingId
+
+===============================================================================
+                              6. 데이터 플로우 요약
+===============================================================================
+
+🔄 **일반적인 미팅 진행 과정:**
+
+1️⃣ **사용자 인증**
+   회원가입/로그인 → User 컬렉션
+
+2️⃣ **미팅 시작**
+   미팅 플래너 접근 → Meeting 컬렉션 (선택적)
+
+3️⃣ **후보 장소 수집**
+   장소 추가 → CandidatePlace 컬렉션
+
+4️⃣ **투표 진행**
+   참가자 등록 → 메모리/localStorage
+   투표 → Vote 컬렉션
+
+5️⃣ **결과 확정**
+   최종 장소 선택 → UserMeetingHistory 컬렉션
+
+6️⃣ **히스토리 관리**
+   상태 변경/삭제 → UserMeetingHistory 컬렉션
+
+===============================================================================
+                              7. 주요 특징 및 패턴
+===============================================================================
+
+🔄 **데이터 동기화 패턴:**
+   - 투표 시스템: 실시간 Socket.io + MongoDB 백업
+   - 히스토리: 비동기 저장 (사용자 경험 우선)
+   - 통계: 집계 쿼리 활용
+
+🛡️ **데이터 무결성:**
+   - 복합 유니크 인덱스로 중복 방지
+   - 필수 필드 검증
+   - 트랜잭션 미사용 (MongoDB 단일 문서 원자성 활용)
+
+⚡ **성능 최적화:**
+   - 인덱스 설계: 쿼리 패턴 기반
+   - 페이지네이션: skip/limit 방식
+   - 집계 파이프라인: 통계 계산
+
+💾 **저장 전략:**
+   - 로그인 사용자: MongoDB 저장
+   - 게스트: localStorage 활용
+   - 하이브리드: 필요시 DB 마이그레이션
+
+===============================================================================
+                                8. 개선 가능 사항
+===============================================================================
+
+🔧 **현재 미구현 기능:**
+   - Meeting 컬렉션 완전 활용 (현재 부분적)
+   - 실시간 알림 시스템
+   - 데이터 분석 대시보드
+
+📈 **성능 개선 고려사항:**
+   - Vote 컬렉션 TTL 인덱스 (오래된 투표 자동 삭제)
+   - UserMeetingHistory 파티셔닝 (사용자별 샤딩)
+   - 캐싱 레이어 추가 (Redis)
+
+🛡️ **보안 강화:**
+   - API 인증 미들웨어 완전 적용
+   - 입력 데이터 검증 강화
+   - 권한 기반 접근 제어
+
+===============================================================================
+
+===============================================================================
+                              9. 날짜/시간 처리 개선사항
+===============================================================================
+
+🕐 **UTC → 한국시간 변환 시스템 구축 완료**
+
+📊 **데이터베이스 정책:**
+   - 모든 날짜/시간: UTC로 저장 (국제 표준 준수)
+   - 예시: 2025-06-21T02:29:15.121Z (UTC) = 2025년 6월 21일 오전 11:29 (한국시간)
+
+🎨 **프론트엔드 표시:**
+   - client/src/utils/dateUtils.js: 날짜 변환 유틸리티 함수들
+   - formatDate(): 기본 한국어 포맷 (년월일 시분)
+   - formatRelativeTime(): 상대 시간 (5분 전, 2시간 전)
+   - formatVoteTime(): 투표 시간용 간단 포맷
+   - formatLoginTime(): 로그인 기록용 상세 포맷
+
+🔧 **적용된 컴포넌트:**
+   - client/src/components/MeetingHistory.js: 히스토리 날짜 표시
+   - client/src/components/GroupVoting.js: 투표 시간 표시  
+   - client/src/pages/ProfilePage.js: 가입일 표시
+   - client/src/components/DateTimeTest.js: 테스트 컴포넌트 (개발용)
+
+⚡ **브라우저 자동 감지:**
+   - JavaScript Date.toLocaleDateString('ko-KR') 활용
+   - 사용자 브라우저 로케일 자동 적용
+   - 별도 라이브러리 의존성 없음
+
+🧪 **테스트 페이지:**
+   - /date-test: UTC ↔ 한국시간 변환 확인 페이지
+
+===============================================================================
+
+📝 **마지막 업데이트**: 2024년 (UTC → 한국시간 변환 시스템 추가)
+🔍 **분석 범위**: 전체 프론트엔드 컴포넌트 + 백엔드 라우터 + 데이터 모델 + 시간대 처리
+✅ **분석 완료**: 주요 사용자 플로우의 모든 버튼-API-테이블 매핑 관계 + 날짜 시간 표시 개선
+
+=============================================================================== 

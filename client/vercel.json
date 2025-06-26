@@ -1,15 +1,31 @@
 {
-  "buildCommand": "CI=false npm run build",
-  "outputDirectory": "build",
-  "installCommand": "npm install",
-  "env": {
-    "CI": "false",
-    "GENERATE_SOURCEMAP": "false"
-  },
-  "rewrites": [
+  "version": 2,
+  "builds": [
     {
-      "source": "/(.*)",
-      "destination": "/index.html"
+      "src": "package.json",
+      "use": "@vercel/static-build",
+      "config": {
+        "distDir": "build"
+      }
     }
-  ]
+  ],
+  "routes": [
+    {
+      "src": "/static/(.*)",
+      "headers": { "cache-control": "s-maxage=31536000,immutable" },
+      "dest": "/static/$1"
+    },
+    {
+      "src": "/(.*)",
+      "dest": "/index.html"
+    }
+  ],
+  "env": {
+    "NODE_ENV": "production"
+  },
+  "functions": {
+    "app/api/**/*.js": {
+      "runtime": "@vercel/node@18.x"
+    }
+  }
 } 

@@ -110,7 +110,7 @@ const PremiumFeatures = () => {
             <div>
               <h4 className="font-medium text-yellow-800">현재 무료 체험 중</h4>
               <p className="text-sm text-yellow-700">
-                AI 추천: {userAnalytics.featuresUsed?.length || 0}/3회 사용
+                AI 추천: {userAnalytics.featuresUsed?.length || 0}/5회 사용
               </p>
             </div>
             <button

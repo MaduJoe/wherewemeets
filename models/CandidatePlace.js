@@ -81,18 +81,50 @@ candidatePlaceSchema.statics.addCandidate = async function(meetingId, placeData)
       throw new Error('addedBy 정보가 필요합니다.');
     }
     
-    const candidate = new this({
-      meetingId,
-      placeId: placeData.id,
-      name: placeData.name,
-      category: placeData.category || 'other',
-      address: placeData.address || '주소 정보 없음',
-      coordinates: placeData.coordinates || { lat: 0, lng: 0 },
-      rating: placeData.rating || 0,
-      photos: placeData.photos || [],
-      additionalInfo: placeData.additionalInfo || '',
-      addedBy: placeData.addedBy
-    });
+    // photos 데이터 처리: 객체 배열이면 URL만 추출, 문자열 배열이면 그대로 사용
+    let processedPhotos = [];
+    if (placeData.photos && Array.isArray(placeData.photos)) {
+      processedPhotos = placeData.photos.map(photo => {
+        if (typeof photo === 'string') {
+          return photo; // 이미 문자열이면 그대로 사용
+        } else if (photo && photo.photo_reference) {
+          // Google Places API 형식
+          return `https://maps.googleapis.com/maps/api/place/photo?maxwidth=400&photoreference=${photo.photo_reference}&key=${process.env.GOOGLE_PLACES_API_KEY}`;
+        } else if (photo && photo.url) {
+          // URL 필드가 있는 경우
+          return photo.url;
+        } else if (photo && typeof photo === 'object') {
+          // 다른 객체 형식인 경우 JSON 문자열로 변환하거나 빈 문자열
+          return JSON.stringify(photo);
+        }
+        return ''; // 기본값
+      }).filter(url => url && url.length > 0); // 빈 문자열 제거
+    }
+
+    // 데이터 타입 안전성 검사 및 변환
+    const safeData = {
+      meetingId: String(meetingId),
+      placeId: String(placeData.id),
+      name: String(placeData.name),
+      category: String(placeData.category || 'other'),
+      address: String(placeData.address || '주소 정보 없음'),
+      coordinates: {
+        lat: Number(placeData.coordinates?.lat || 0),
+        lng: Number(placeData.coordinates?.lng || 0)
+      },
+      rating: Number(placeData.rating || 0),
+      photos: processedPhotos,
+      additionalInfo: String(placeData.additionalInfo || ''),
+      addedBy: {
+        id: String(placeData.addedBy.id),
+        name: String(placeData.addedBy.name),
+        email: placeData.addedBy.email ? String(placeData.addedBy.email) : null
+      }
+    };
+
+    console.log('처리된 안전한 데이터:', safeData);
+
+    const candidate = new this(safeData);
     
     console.log('CandidatePlace 객체 생성 완료:', candidate);
     

@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { useAuth } from '../contexts/AuthContext';
 import api from '../utils/api';
+import { formatDate, formatRelativeTime } from '../utils/dateUtils';
 import './MeetingHistory.css';
 
 const MeetingHistory = () => {
@@ -99,17 +100,7 @@ const MeetingHistory = () => {
     }
   };
 
-  // 날짜 포맷팅
-  const formatDate = (dateString) => {
-    const date = new Date(dateString);
-    return date.toLocaleDateString('ko-KR', {
-      year: 'numeric',
-      month: 'long',
-      day: 'numeric',
-      hour: '2-digit',
-      minute: '2-digit'
-    });
-  };
+  // 날짜 포맷팅은 이제 utils에서 import하여 사용
 
   // 카테고리 아이콘
   const getCategoryIcon = (category) => {

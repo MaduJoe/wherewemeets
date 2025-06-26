@@ -36,12 +36,15 @@ const Navbar = () => {
             </Link> */}
             {user ? (
               <>
-                <Link to="/dashboard" className="text-gray-700 hover:text-primary-600 transition duration-200">
-                  대시보드
-                </Link>
-                <Link to="/create-meeting" className="btn-primary">
+                {/* 게스트 사용자와 무료 사용자는 대시보드 링크 숨김 */}
+                {!user.isGuest && user.subscription === 'premium' && (
+                  <Link to="/dashboard" className="text-gray-700 hover:text-primary-600 transition duration-200">
+                    대시보드
+                  </Link>
+                )}
+                {/* <Link to="/create-meeting" className="btn-primary">
                   미팅 만들기
-                </Link>
+                </Link> */}
                 <div className="relative group">
                   <button className="flex items-center space-x-2 text-gray-700 hover:text-primary-600">
                     <UserCircleIcon className="h-6 w-6" />
@@ -107,13 +110,16 @@ const Navbar = () => {
             </Link>
             {user ? (
               <>
-                <Link 
-                  to="/dashboard" 
-                  className="block px-3 py-2 text-gray-700 hover:text-primary-600"
-                  onClick={() => setIsMenuOpen(false)}
-                >
-                  대시보드
-                </Link>
+                {/* 게스트 사용자와 무료 사용자는 대시보드 링크 숨김 */}
+                {!user.isGuest && user.subscription === 'premium' && (
+                  <Link 
+                    to="/dashboard" 
+                    className="block px-3 py-2 text-gray-700 hover:text-primary-600"
+                    onClick={() => setIsMenuOpen(false)}
+                  >
+                    대시보드
+                  </Link>
+                )}
                 <Link 
                   to="/create-meeting" 
                   className="block px-3 py-2 text-gray-700 hover:text-primary-600"

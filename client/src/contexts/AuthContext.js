@@ -11,7 +11,12 @@ export const useAuth = () => {
   return context;
 };
 
-const API_BASE_URL = process.env.REACT_APP_API_URL || 'https://wherewemeets-production.up.railway.app/api';
+// const API_BASE_URL = process.env.REACT_APP_API_URL || 'https://wherewemeets-production.up.railway.app/api';
+
+// API Base URL 설정 (api.js와 동일한 로직)
+const API_BASE_URL = window.location.hostname === 'localhost' 
+  ? 'http://localhost:5000/api'
+  : 'https://wherewemeets-production.up.railway.app/api';
 
 export const AuthProvider = ({ children }) => {
   const [user, setUser] = useState(null);
@@ -52,23 +57,29 @@ export const AuthProvider = ({ children }) => {
             setUser(data.user);
             setIsAuthenticated(true);
           } else {
-            // 토큰이 유효하지 않으면 로컬 스토리지에서 제거
+            // 토큰이 유효하지 않으면 로컬 스토리지에서 제거하고 게스트 모드로 전환
             localStorage.removeItem('token');
+            createGuestUser();
           }
         } catch (fetchError) {
           clearTimeout(timeoutId);
           if (fetchError.name === 'AbortError') {
-            console.warn('서버 연결 타임아웃 - 로컬 전용 모드로 진행');
+            console.warn('서버 연결 타임아웃 - 게스트 모드로 진행');
           } else {
             console.error('API 호출 에러:', fetchError);
           }
-          // 네트워크 오류 시에도 토큰 제거
+          // 네트워크 오류 시에도 토큰 제거하고 게스트 모드로 전환
           localStorage.removeItem('token');
+          createGuestUser();
         }
+      } else {
+        // 토큰이 없으면 게스트 사용자 생성
+        createGuestUser();
       }
     } catch (error) {
       console.error('인증 초기화 에러:', error);
       localStorage.removeItem('token');
+      createGuestUser();
     } finally {
       setLoading(false);
     }
@@ -201,9 +212,8 @@ export const AuthProvider = ({ children }) => {
 
   const logout = () => {
     localStorage.removeItem('token');
-    setUser(null);
-    setIsAuthenticated(false);
-    toast.success('로그아웃되었습니다.');
+    createGuestUser(); // 로그아웃 시 게스트 모드로 전환
+    toast.success('로그아웃되었습니다. 게스트 모드로 전환됩니다.');
   };
 
   const updateProfile = async (profileData) => {
@@ -362,8 +372,16 @@ export const AuthProvider = ({ children }) => {
 
   // 게스트 사용자 생성 (기존 호환성 유지)
   const createGuestUser = () => {
+    // 기존 게스트 정보가 있는지 확인
+    const existingGuestId = localStorage.getItem('guestUserId');
+    const guestId = existingGuestId || 'guest-' + Date.now();
+    
+    if (!existingGuestId) {
+      localStorage.setItem('guestUserId', guestId);
+    }
+    
     const guestUser = {
-      id: 'guest-' + Date.now(),
+      id: guestId,
       name: '게스트 사용자',
       email: '',
       subscription: 'free',
@@ -373,6 +391,7 @@ export const AuthProvider = ({ children }) => {
     
     setUser(guestUser);
     setIsAuthenticated(false); // 게스트는 인증되지 않은 상태
+    console.log('게스트 사용자 생성됨:', guestUser);
     return guestUser;
   };
 

@@ -7,6 +7,7 @@ import {
   ScaleIcon,
   ChartBarIcon
 } from '@heroicons/react/24/outline';
+import Dice3D from './Dice3D';
 
 // VoteService 클래스 (GroupVoting과 동일)
 class VoteService {
@@ -300,6 +301,53 @@ const RandomSelector = ({ meetingId, onLocationSelected }) => {
   const [resultAnimating, setResultAnimating] = useState(false);
   const [socketConnected, setSocketConnected] = useState(false);
   const [lastUpdated, setLastUpdated] = useState(null);
+  
+  // 주사위 관련 상태
+  const [diceRolling, setDiceRolling] = useState(false);
+  const [diceResult, setDiceResult] = useState(null);
+  const [shouldRoll3D, setShouldRoll3D] = useState(false);
+  
+  // 퀴즈 관련 상태
+  const [quizMode, setQuizMode] = useState(false);
+  const [currentQuiz, setCurrentQuiz] = useState(null);
+  const [quizAnswer, setQuizAnswer] = useState('');
+  const [quizParticipants, setQuizParticipants] = useState([]);
+  
+  // 타이밍 게임 상태
+  const [timingGameMode, setTimingGameMode] = useState(false);
+  const [targetTime, setTargetTime] = useState(null); // 목표 시간 (초)
+  const [currentTime, setCurrentTime] = useState(0); // 현재 타이머 시간 (밀리초)
+  const [gameRunning, setGameRunning] = useState(false);
+  const [gamePhase, setGamePhase] = useState('waiting'); // 'waiting', 'running', 'stopped', 'finished'
+  const [gameInterval, setGameInterval] = useState(null);
+  const [stoppedTime, setStoppedTime] = useState(null);
+
+  // localStorage에서 룰렛 결과 복원
+  useEffect(() => {
+    if (meetingId) {
+      const savedResult = localStorage.getItem(`roulette_result_${meetingId}`);
+      if (savedResult) {
+        try {
+          const parsedResult = JSON.parse(savedResult);
+          console.log('🎲 localStorage에서 룰렛 결과 복원:', parsedResult);
+          setResult(parsedResult);
+          setResultAnimating(false);
+        } catch (error) {
+          console.error('룰렛 결과 복원 실패:', error);
+          localStorage.removeItem(`roulette_result_${meetingId}`);
+        }
+      }
+    }
+  }, [meetingId]);
+
+  // 컴포넌트 언마운트 시 인터벌 정리
+  useEffect(() => {
+    return () => {
+      if (gameInterval) {
+        clearInterval(gameInterval);
+      }
+    };
+  }, [gameInterval]);
 
   // Socket.io 연결 설정
   useEffect(() => {
@@ -327,16 +375,55 @@ const RandomSelector = ({ meetingId, onLocationSelected }) => {
       // 실시간 데이터 업데이트 감지
       newSocket.on('data-updated', (data) => {
         console.log('실시간 데이터 업데이트:', data);
-        // 데이터 로딩 중이 아닐 때만 로드 (백그라운드 업데이트)
-        if (!isDataLoading) {
-          loadCandidatePlacesData(true, false); // 강제 업데이트, 로딩 스피너 없음
+        
+        // 선정 결과 업데이트인 경우 즉시 반영
+        if (data.type === 'selection' && data.participantId) {
+          console.log('🎯 실시간 선정 결과 감지:', data);
+          // 데이터를 다시 로드하여 최신 선정 결과 확인
+          setTimeout(() => {
+            if (!isDataLoading) {
+              loadCandidatePlacesData(true, false); // 강제 업데이트, 로딩 스피너 없음
+            }
+          }, 500); // 서버 저장 완료 후 로드
+        } else {
+          // 일반 데이터 업데이트
+          if (!isDataLoading) {
+            loadCandidatePlacesData(true, false); // 강제 업데이트, 로딩 스피너 없음
+          }
         }
       });
 
       // 룰렛 완료 이벤트 감지 (다른 사용자의 룰렛 결과)
       newSocket.on('roulette-finished', (data) => {
         console.log('다른 사용자의 룰렛 완료:', data);
-        // 다른 사용자의 룰렛 결과도 화면에 표시할 수 있음
+        // 다른 사용자의 룰렛 결과를 즉시 반영
+        if (data.winner && data.winner.id) {
+          const resultData = {
+            selectedPlace: data.winner,
+            message: `${data.winner.name}이(가) 선정되었습니다!`,
+            fairnessInfo: getFairnessInfo(data.winner, candidatePlaces),
+            isRestoredResult: true,
+            timestamp: data.timestamp ? new Date(data.timestamp).toISOString() : new Date().toISOString()
+          };
+          
+          setResult(resultData);
+          setResultAnimating(false);
+          
+          // localStorage에도 동기화
+          try {
+            localStorage.setItem(`roulette_result_${meetingId}`, JSON.stringify(resultData));
+            console.log('🔄 실시간 룰렛 결과 동기화 완료');
+          } catch (error) {
+            console.error('실시간 룰렛 결과 저장 실패:', error);
+          }
+        }
+        
+        // 데이터도 다시 로드하여 선정 카운트 업데이트
+        setTimeout(() => {
+          if (!isDataLoading) {
+            loadCandidatePlacesData(true, false);
+          }
+        }, 1000);
       });
 
       return () => {
@@ -353,7 +440,7 @@ const RandomSelector = ({ meetingId, onLocationSelected }) => {
       if (!isDataLoading) {
         loadCandidatePlacesData(false, false); // 백그라운드 업데이트, 로딩 스피너 없음
       }
-    }, 10000); // 10초마다 백업 업데이트 (Socket.io가 실패할 경우 대비)
+    }, 5000); // 5초마다 백업 업데이트 (더 빠른 동기화)
 
     return () => clearInterval(interval);
   }, [meetingId, isDataLoading]);
@@ -382,11 +469,28 @@ const RandomSelector = ({ meetingId, onLocationSelected }) => {
       const response = await api.get(`/votes/${meetingId}`);
       
       const data = response.data.data || {};
-      const { candidatePlaces: votesCandidatePlaces, selectionHistory: serverHistory, selectionCounts } = data;
+      const { candidatePlaces: votesCandidatePlaces, selectionHistory: serverHistory, selectionCounts, votes: votesData } = data;
+      
+      console.log('📊 RandomSelector API 응답 데이터:', {
+        candidatePlacesCount: votesCandidatePlaces?.length || 0,
+        votesDataKeys: Object.keys(votesData || {}),
+        votesData: votesData
+      });
       
       if (votesCandidatePlaces && votesCandidatePlaces.length > 0) {
         const formattedPlaces = votesCandidatePlaces.map((place, index) => {
           const count = selectionCounts[place.id] || 0;
+          // votes 데이터에서 실제 투표자 수 계산
+          const voters = votesData?.[place.id] || [];
+          const actualVotes = Array.isArray(voters) ? voters.length : 0;
+          
+          console.log(`🗳️ 장소 "${place.name}" 투표 계산:`, {
+            placeId: place.id,
+            votersArray: voters,
+            votersLength: voters.length,
+            actualVotes: actualVotes,
+            originalPlaceVotes: place.votes
+          });
           
           return {
             id: place.id,
@@ -395,7 +499,8 @@ const RandomSelector = ({ meetingId, onLocationSelected }) => {
             location: place.address || '주소 정보 없음',
             avatar: getPlaceAvatar(place.category, index),
             selectedCount: count,
-            votes: place.votes || 0,
+            votes: actualVotes, // 실제 투표자 수 사용
+            voters: voters, // 투표자 정보도 저장
           };
         });
         
@@ -413,20 +518,34 @@ const RandomSelector = ({ meetingId, onLocationSelected }) => {
           setSelectionHistory(serverHistory || []);
         }
 
-        // 가장 최근 선정 결과가 있고, 현재 결과가 없거나 복원이 필요한 경우만 표시
-        if (serverHistory && serverHistory.length > 0 && (!result || showLoading)) {
+        // 가장 최근 선정 결과 복원 처리 (서버 우선)
+        if (serverHistory && serverHistory.length > 0) {
           const latestSelection = serverHistory[0];
           const selectedPlace = formattedPlaces.find(p => p.id === latestSelection.selectedParticipantId);
           
-          if (selectedPlace && (!result || result.selectedPlace.id !== selectedPlace.id)) {
-            console.log('최근 선정 결과 복원:', selectedPlace);
-            setResult({
-              selectedPlace,
-              message: `${selectedPlace.name}이(가) 선정되었습니다!`,
-              fairnessInfo: getFairnessInfo(selectedPlace, formattedPlaces),
-              isRestoredResult: true
-            });
-            setResultAnimating(false);
+          if (selectedPlace) {
+            // 현재 결과가 없거나, 서버 결과와 다른 경우 서버 결과로 업데이트
+            if (!result || result.selectedPlace.id !== selectedPlace.id) {
+              console.log('📋 서버에서 최근 선정 결과 복원:', selectedPlace);
+              const serverResultData = {
+                selectedPlace,
+                message: `${selectedPlace.name}이(가) 선정되었습니다!`,
+                fairnessInfo: getFairnessInfo(selectedPlace, formattedPlaces),
+                isRestoredResult: true,
+                timestamp: latestSelection.timestamp || new Date().toISOString()
+              };
+              
+              setResult(serverResultData);
+              setResultAnimating(false);
+              
+              // 서버 결과를 localStorage에도 동기화
+              try {
+                localStorage.setItem(`roulette_result_${meetingId}`, JSON.stringify(serverResultData));
+                console.log('🔄 서버 결과로 localStorage 동기화 완료');
+              } catch (error) {
+                console.error('서버 결과 localStorage 저장 실패:', error);
+              }
+            }
           }
         }
       } else {
@@ -459,7 +578,8 @@ const RandomSelector = ({ meetingId, onLocationSelected }) => {
       const p2 = arr2[index];
       return p1.id === p2.id && 
              p1.name === p2.name && 
-             p1.selectedCount === p2.selectedCount;
+             p1.selectedCount === p2.selectedCount &&
+             p1.votes === p2.votes; // 투표 수 변경도 감지
     });
   };
 
@@ -496,14 +616,26 @@ const RandomSelector = ({ meetingId, onLocationSelected }) => {
     {
       id: 'random',
       name: '완전 랜덤',
-      icon: '🎲',
+      icon: '🎯',
       description: '모든 후보 장소가 동일한 확률로 선정'
     },
     {
       id: 'balanced',
-      name: '균형 선정',
-      icon: '⚖️',
-      description: '적게 선정된 장소 우선으로 공정하게 선정'
+      name: '타이밍 스톱',
+      icon: '⏱️',
+      description: '목표 시간에 가장 근접하게 멈춘 사람이 승리'
+    },
+    {
+      id: 'dice',
+      name: '운명의 주사위',
+      icon: '🎲',
+      description: '각 장소에 주사위 번호를 배정하고 주사위로 결정'
+    },
+    {
+      id: 'quiz',
+      name: '스피드 퀴즈',
+      icon: '🧠',
+      description: '장소별 퀴즈를 풀어서 최종 선택권 획득'
     }
   ];
 
@@ -513,7 +645,7 @@ const RandomSelector = ({ meetingId, onLocationSelected }) => {
       return;
     }
 
-    if (spinning) {
+    if (spinning || diceRolling || quizMode || timingGameMode) {
       return;
     }
 
@@ -521,19 +653,23 @@ const RandomSelector = ({ meetingId, onLocationSelected }) => {
     setResult(null);
     setResultAnimating(false);
 
-    // 선정 알고리즘 적용
-    let selectedPlace;
+    // 선정 방식에 따라 다른 동작
     switch (fairnessMode) {
+      case 'dice':
+        rollDice();
+        break;
+      case 'quiz':
+        startQuiz();
+        break;
       case 'balanced':
-        selectedPlace = getBalancedSelection();
+        startTimingGame();
         break;
       default:
-        selectedPlace = getRandomSelection();
+        const randomPlace = getRandomSelection();
+        setWinningSegment(randomPlace);
+        setSpinning(true);
+        setIsRouletteOwner(true);
     }
-
-    setWinningSegment(selectedPlace);
-    setSpinning(true);
-    setIsRouletteOwner(true); // 이 사용자가 룰렛을 시작했음을 표시
   };
 
   // 완전 랜덤 선정
@@ -548,6 +684,305 @@ const RandomSelector = ({ meetingId, onLocationSelected }) => {
     const leastSelected = candidatePlaces.filter(p => p.selectedCount === minCount);
     const randomIndex = Math.floor(Math.random() * leastSelected.length);
     return leastSelected[randomIndex];
+  };
+
+  // 3D 주사위 굴리기 함수
+  const rollDice = () => {
+    if (candidatePlaces.length === 0) {
+      alert('후보 장소가 없습니다.');
+      return;
+    }
+
+    setDiceRolling(true);
+    setResult(null);
+    setResultAnimating(false);
+    setDiceResult(null);
+    
+    // 3D 주사위 굴리기 시작
+    setShouldRoll3D(true);
+  };
+
+  // 3D 주사위 결과 처리
+  const handle3DDiceResult = (result) => {
+    const selectedIndex = (result - 1) % candidatePlaces.length;
+    const selectedPlace = candidatePlaces[selectedIndex];
+    
+    setDiceResult(result);
+    setDiceRolling(false);
+    
+    // 서버에 결과 저장
+    recordSelectionOnServer(selectedPlace);
+    
+    const diceSymbols = ['⚀', '⚁', '⚂', '⚃', '⚄', '⚅'];
+    const resultData = {
+      selectedPlace,
+      message: `🎲 3D 주사위가 ${diceSymbols[result - 1]} (${result}번)을 가리켰습니다! ${selectedPlace.name}이(가) 선정되었습니다!`,
+      fairnessInfo: getFairnessInfo(selectedPlace),
+      isRestoredResult: false,
+      timestamp: new Date().toISOString(),
+      selectionMethod: 'dice'
+    };
+    
+    setResult(resultData);
+    setResultAnimating(true);
+    
+    // localStorage에 저장
+    if (meetingId) {
+      try {
+        localStorage.setItem(`roulette_result_${meetingId}`, JSON.stringify(resultData));
+      } catch (error) {
+        console.error('주사위 결과 저장 실패:', error);
+      }
+    }
+    
+    setTimeout(() => setResultAnimating(false), 3000);
+    
+    if (onLocationSelected) {
+      onLocationSelected(selectedPlace);
+    }
+  };
+
+  // 3D 주사위 리셋 함수
+  const reset3DDice = () => {
+    setShouldRoll3D(false);
+  };
+
+  // 퀴즈 생성 함수
+  const generateQuiz = (place) => {
+    const quizTemplates = [
+      {
+        type: 'category',
+        question: `"${place.name}"은(는) 어떤 종류의 장소인가요?`,
+        answers: [place.category, '카페', '레스토랑', '엔터테인먼트'],
+        correct: place.category
+      },
+      {
+        type: 'location',
+        question: `"${place.name}"의 주소에 포함된 키워드는?`,
+        answers: place.address ? [
+          place.address.split(' ')[1] || '강남구',
+          '종로구', '마포구', '송파구'
+        ] : ['강남구', '종로구', '마포구', '송파구'],
+        correct: place.address ? place.address.split(' ')[1] || '강남구' : '강남구'
+      },
+      {
+        type: 'emoji',
+        question: `"${place.name}" 장소를 가장 잘 표현하는 이모지는?`,
+        answers: [place.avatar, '🍕', '☕', '🎮'],
+        correct: place.avatar
+      }
+    ];
+    
+    const template = quizTemplates[Math.floor(Math.random() * quizTemplates.length)];
+    
+    // 답안 섞기
+    const shuffledAnswers = [...template.answers].sort(() => Math.random() - 0.5);
+    
+    return {
+      place,
+      question: template.question,
+      answers: shuffledAnswers,
+      correct: template.correct
+    };
+  };
+
+  // 퀴즈 시작
+  const startQuiz = () => {
+    if (candidatePlaces.length === 0) {
+      alert('후보 장소가 없습니다.');
+      return;
+    }
+
+    setResult(null);
+    setResultAnimating(false);
+    
+    // 랜덤으로 장소 선택해서 퀴즈 생성
+    const randomPlace = candidatePlaces[Math.floor(Math.random() * candidatePlaces.length)];
+    const quiz = generateQuiz(randomPlace);
+    
+    setCurrentQuiz(quiz);
+    setQuizMode(true);
+    setQuizAnswer('');
+  };
+
+  // 퀴즈 답안 제출
+  const submitQuizAnswer = () => {
+    if (!quizAnswer) {
+      alert('답안을 선택해주세요!');
+      return;
+    }
+
+    const isCorrect = quizAnswer === currentQuiz.correct;
+    
+    if (isCorrect) {
+      // 정답 - 해당 장소 선정
+      const selectedPlace = currentQuiz.place;
+      recordSelectionOnServer(selectedPlace);
+      
+      const resultData = {
+        selectedPlace,
+        message: `🧠 정답입니다! "${selectedPlace.name}"이(가) 선정되었습니다!`,
+        fairnessInfo: getFairnessInfo(selectedPlace),
+        isRestoredResult: false,
+        timestamp: new Date().toISOString(),
+        selectionMethod: 'quiz'
+      };
+      
+      setResult(resultData);
+      setResultAnimating(true);
+      
+      // localStorage에 저장
+      if (meetingId) {
+        try {
+          localStorage.setItem(`roulette_result_${meetingId}`, JSON.stringify(resultData));
+        } catch (error) {
+          console.error('퀴즈 결과 저장 실패:', error);
+        }
+      }
+      
+      setTimeout(() => setResultAnimating(false), 3000);
+      
+      if (onLocationSelected) {
+        onLocationSelected(selectedPlace);
+      }
+    } else {
+      alert(`🤔 아쉽게도 틀렸습니다! 정답은 "${currentQuiz.correct}"입니다. 다시 시도해보세요!`);
+    }
+    
+    setQuizMode(false);
+    setCurrentQuiz(null);
+    setQuizAnswer('');
+  };
+
+  // 타이밍 게임 시작
+  const startTimingGame = () => {
+    if (candidatePlaces.length === 0) {
+      alert('후보 장소가 없습니다.');
+      return;
+    }
+
+    setResult(null);
+    setResultAnimating(false);
+    
+    // 1.00~7.00 초 사이의 랜덤 목표 시간 생성 (0.5초 단위)
+    const possibleTimes = [1.0, 1.5, 2.0, 2.5, 3.0, 3.5, 4.0, 4.5, 5.0, 5.5, 6.0, 6.5, 7.0];
+    const randomTarget = possibleTimes[Math.floor(Math.random() * possibleTimes.length)];
+    
+    setTargetTime(randomTarget);
+    setTimingGameMode(true);
+    setCurrentTime(0);
+    setStoppedTime(null);
+    setGamePhase('running');
+    setGameRunning(true);
+    
+    // 타이머 시작 (10ms마다 업데이트)
+    const interval = setInterval(() => {
+      setCurrentTime(prev => prev + 10);
+    }, 10);
+    
+    setGameInterval(interval);
+  };
+
+  // Stop 버튼 클릭
+  const stopTimingGame = () => {
+    if (!gameRunning) return;
+    
+    const finalTime = currentTime;
+    setStoppedTime(finalTime);
+    setGameRunning(false);
+    setGamePhase('stopped');
+    
+    // 인터벌 중지
+    if (gameInterval) {
+      clearInterval(gameInterval);
+      setGameInterval(null);
+    }
+    
+    // 결과 계산 (밀리초 단위로 계산)
+    const targetMs = targetTime * 1000;
+    const difference = Math.abs(targetMs - finalTime);
+    
+    let resultMessage = '';
+    let isWin = false;
+    
+    // 정확도에 따른 승부 결정 (100ms 이하면 완벽, 500ms 이하면 성공)
+    if (difference <= 100) {
+      resultMessage = `🎯 완벽합니다! 목표: ${targetTime.toFixed(2)}초, 기록: ${(finalTime/1000).toFixed(2)}초 (차이: ${difference}ms)`;
+      isWin = true;
+    } else if (difference <= 300) {
+      resultMessage = `🎉 훌륭합니다! 목표: ${targetTime.toFixed(2)}초, 기록: ${(finalTime/1000).toFixed(2)}초 (차이: ${difference}ms)`;
+      isWin = true;
+    } else if (difference <= 500) {
+      resultMessage = `😊 좋습니다! 목표: ${targetTime.toFixed(2)}초, 기록: ${(finalTime/1000).toFixed(2)}초 (차이: ${difference}ms)`;
+      isWin = true;
+    } else {
+      resultMessage = `😅 아쉽네요! 목표: ${targetTime.toFixed(2)}초, 기록: ${(finalTime/1000).toFixed(2)}초 (차이: ${difference}ms)`;
+      isWin = false;
+    }
+    
+    setTimeout(() => {
+      if (isWin) {
+        // 승리 시 랜덤 장소 선정
+        const randomPlace = candidatePlaces[Math.floor(Math.random() * candidatePlaces.length)];
+        recordSelectionOnServer(randomPlace);
+        
+        const resultData = {
+          selectedPlace: randomPlace,
+          message: `⏱️ ${resultMessage} "${randomPlace.name}"이(가) 선정되었습니다!`,
+          fairnessInfo: getFairnessInfo(randomPlace),
+          isRestoredResult: false,
+          timestamp: new Date().toISOString(),
+          selectionMethod: 'timing'
+        };
+        
+        setResult(resultData);
+        setResultAnimating(true);
+        
+        // localStorage에 저장
+        if (meetingId) {
+          try {
+            localStorage.setItem(`roulette_result_${meetingId}`, JSON.stringify(resultData));
+          } catch (error) {
+            console.error('타이밍 게임 결과 저장 실패:', error);
+          }
+        }
+        
+        setTimeout(() => setResultAnimating(false), 3000);
+        
+        if (onLocationSelected) {
+          onLocationSelected(randomPlace);
+        }
+
+        setGamePhase('finished');
+      } else {
+        alert(`${resultMessage}\n\n다시 시도해보세요!`);
+        resetTimingGame();
+      }
+    }, 1500);
+  };
+
+  // 타이밍 게임 초기화
+  const resetTimingGame = () => {
+    if (gameInterval) {
+      clearInterval(gameInterval);
+      setGameInterval(null);
+    }
+    setTimingGameMode(false);
+    setTargetTime(null);
+    setCurrentTime(0);
+    setStoppedTime(null);
+    setGameRunning(false);
+    setGamePhase('waiting');
+  };
+
+  // 시간을 MM:SS:MS 형식으로 포맷
+  const formatTime = (milliseconds) => {
+    const totalSeconds = Math.floor(milliseconds / 1000);
+    const minutes = Math.floor(totalSeconds / 60);
+    const seconds = totalSeconds % 60;
+    const ms = Math.floor((milliseconds % 1000) / 10);
+    
+    return `${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}:${ms.toString().padStart(2, '0')}`;
   };
 
   const getFairnessInfo = (selectedPlace, placesList = candidatePlaces) => {
@@ -617,12 +1052,25 @@ const RandomSelector = ({ meetingId, onLocationSelected }) => {
     setSpinning(false);
     
     const fairnessInfo = getFairnessInfo(winner);
-    setResult({
+    const resultData = {
       selectedPlace: winner,
       message: `${winner.name}이(가) 선정되었습니다!`,
       fairnessInfo,
-      isRestoredResult: false
-    });
+      isRestoredResult: false,
+      timestamp: new Date().toISOString()
+    };
+    
+    setResult(resultData);
+    
+    // localStorage에 결과 저장
+    if (meetingId) {
+      try {
+        localStorage.setItem(`roulette_result_${meetingId}`, JSON.stringify(resultData));
+        console.log('🎲 룰렛 결과 localStorage에 저장:', resultData);
+      } catch (error) {
+        console.error('룰렛 결과 저장 실패:', error);
+      }
+    }
     
     // 결과 애니메이션 시작
     setResultAnimating(true);
@@ -657,6 +1105,24 @@ const RandomSelector = ({ meetingId, onLocationSelected }) => {
     if (count < avg * 0.7) return { level: '적음', color: 'text-green-600' };
     if (count > avg * 1.3) return { level: '많음', color: 'text-red-600' };
     return { level: '보통', color: 'text-blue-600' };
+  };
+
+  // 결과 초기화 함수
+  const clearResult = () => {
+    if (window.confirm('룰렛 결과를 초기화하시겠습니까?\n\n이 작업은 되돌릴 수 없습니다.')) {
+      setResult(null);
+      setResultAnimating(false);
+      
+      // localStorage에서도 제거
+      if (meetingId) {
+        try {
+          localStorage.removeItem(`roulette_result_${meetingId}`);
+          console.log('🗑️ 룰렛 결과 초기화 완료');
+        } catch (error) {
+          console.error('룰렛 결과 초기화 실패:', error);
+        }
+      }
+    }
   };
 
   // 로딩 중일 때
@@ -702,163 +1168,331 @@ const RandomSelector = ({ meetingId, onLocationSelected }) => {
           <ScaleIcon className="h-6 w-6 mr-2 text-primary-600" />
           공정성 모드 선택
         </h3>
-        <div className="grid grid-cols-2 gap-3">
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
           {fairnessModes.map(mode => (
             <button
               key={mode.id}
-              onClick={() => setFairnessMode(mode.id)}
-              className={`p-4 text-sm rounded-lg border-2 transition-all ${
+              onClick={() => {
+                // 모든 게임 상태 초기화
+                setSpinning(false);
+                setDiceRolling(false);
+                setQuizMode(false);
+                setTimingGameMode(false);
+                setGameRunning(false);
+                setGamePhase('waiting');
+                if (gameInterval) {
+                  clearInterval(gameInterval);
+                  setGameInterval(null);
+                }
+                setCurrentQuiz(null);
+                setQuizAnswer('');
+                setTargetTime(null);
+                setCurrentTime(0);
+                setStoppedTime(null);
+                setDiceResult(null);
+                setShouldRoll3D(false);
+                
+                // 모드 변경
+                setFairnessMode(mode.id);
+              }}
+              className={`p-4 text-sm rounded-lg border-2 transition-all duration-300 hover:transform hover:scale-105 ${
                 fairnessMode === mode.id
-                  ? 'border-primary-500 bg-primary-50 text-primary-700 transform scale-105'
-                  : 'border-gray-300 text-gray-600 hover:bg-gray-50'
+                  ? 'border-primary-500 bg-primary-50 text-primary-700 transform scale-105 shadow-lg'
+                  : 'border-gray-300 text-gray-600 hover:bg-gray-50 hover:border-gray-400'
               }`}
             >
-              <div className="text-2xl mb-2">{mode.icon}</div>
-              <div className="font-medium">{mode.name}</div>
-              <div className="text-xs opacity-75 mt-1">{mode.description}</div>
+              <div className="text-3xl mb-2">{mode.icon}</div>
+              <div className="font-bold text-sm">{mode.name}</div>
+              <div className="text-xs opacity-75 mt-1 leading-tight">{mode.description}</div>
             </button>
           ))}
         </div>
       </div>
 
-      {/* 공정성 통계 */}
+      {/* 선정 방식별 UI */}
       <div className="bg-white rounded-lg shadow p-6">
-        <div className="flex justify-between items-center mb-4">
-          <h4 className="font-medium text-gray-900 flex items-center">
-            <TrophyIcon className="h-5 w-5 mr-2" />
-            장소별 선정 현황
-          </h4>
-          <div className="flex items-center space-x-2">
-            {/* 연결 상태 표시 */}
-            <div className="flex items-center">
-              <div className={`w-2 h-2 rounded-full mr-1 ${socketConnected ? 'bg-green-500' : 'bg-red-500'}`}></div>
-              <span className="text-xs text-gray-500">
-                {socketConnected ? '실시간 연결' : '연결 끊김'}
-              </span>
+        {/* 룰렛 모드 */}
+        {fairnessMode === 'random' && (
+          <div className="flex flex-col items-center">
+            <div className="mb-4">
+              <div className="scale-75">
+                <WheelComponent 
+                  segments={candidatePlaces}
+                  onFinished={onWheelFinished}
+                  isSpinning={spinning}
+                  winningSegment={winningSegment}
+                  socket={socket}
+                  meetingId={meetingId}
+                />
+              </div>
             </div>
-            
-            {/* 새로고침 버튼 */}
-            <button
-              onClick={handleManualRefresh}
-              disabled={loading}
-              className="text-sm text-blue-600 hover:text-blue-800 flex items-center disabled:opacity-50"
-              title="데이터 새로고침"
-            >
-              <svg className={`w-4 h-4 mr-1 ${loading ? 'animate-spin' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
-              </svg>
-              새로고침
-            </button>
-            
-          <button
-            onClick={() => setShowFairnessStats(!showFairnessStats)}
-            className="text-sm text-blue-600 hover:text-blue-800"
-          >
-            {showFairnessStats ? '숨기기' : '상세보기'}
-          </button>
-        </div>
-        </div>
 
-        {/* 마지막 업데이트 시간 */}
-        {lastUpdated && (
-          <div className="mb-3 text-xs text-gray-500">
-            마지막 업데이트: {lastUpdated.toLocaleTimeString()}
+            <button
+              onClick={startRandomSelection}
+              disabled={spinning || candidatePlaces.length === 0}
+              className={`px-8 py-4 rounded-lg font-bold text-lg transition-all duration-300 w-full max-w-md ${
+                spinning 
+                  ? 'bg-yellow-500 text-white cursor-not-allowed animate-pulse' 
+                  : 'bg-gradient-to-r from-blue-500 to-purple-600 text-white hover:from-blue-600 hover:to-purple-700 hover:transform hover:scale-105 shadow-lg'
+              }`}
+            >
+              {spinning ? (
+                <span>🎲 룰렛 돌리는 중...</span>
+              ) : (
+                <span>
+                  🎯 {fairnessModes.find(m => m.id === fairnessMode)?.name}으로 선정하기
+                </span>
+              )}
+            </button>
           </div>
         )}
-        
-        <div className="grid grid-cols-2 gap-2">
-          {candidatePlaces.map((place, index) => {
-            const fairness = getFairnessLevel(place.selectedCount);
-            return (
-              <div
-                key={place.id}
-                className={`p-3 rounded-lg border-2 ${getParticipantColor(index)}`}
-              >
-                <div className="flex items-center justify-between">
-                  <div className="flex items-center">
-                    <span className="text-2xl mr-2">{place.avatar}</span>
-                    <div>
-                      <p className="font-medium">{place.name}</p>
-                      <p className="text-xs opacity-75">{place.category} • 투표 {place.votes}표</p>
+
+        {/* 타이밍 게임 모드 */}
+        {fairnessMode === 'balanced' && (
+          <div className="flex flex-col items-center space-y-6">
+            <h3 className="text-xl font-bold text-gray-900 mb-4">⏱️ 타이밍 스톱 게임</h3>
+            
+            {!timingGameMode ? (
+              <div className="text-center space-y-4">
+                <div className="bg-purple-50 rounded-lg p-6 max-w-lg">
+                  <p className="text-purple-800 font-medium mb-2">🎯 게임 방법</p>
+                  <p className="text-sm text-purple-700">
+                    목표 시간이 공개됩니다.<br/>
+                    타이머가 0.00초부터 카운트업 하는 동안<br/>
+                    목표 시간에 가장 근접한 순간에 <strong>STOP</strong>을 누르세요!<br/>
+                    차이가 0.5초 이하면 성공입니다.
+                  </p>
+                </div>
+                
+                <button
+                  onClick={startRandomSelection}
+                  disabled={candidatePlaces.length === 0}
+                  className="px-8 py-4 rounded-lg font-bold text-lg transition-all duration-300 w-full max-w-md bg-gradient-to-r from-purple-500 to-indigo-600 text-white hover:from-purple-600 hover:to-indigo-700 hover:transform hover:scale-105 shadow-lg"
+                >
+                  ⏱️ 타이밍 게임 시작!
+                </button>
+              </div>
+            ) : (
+              <div className="w-full max-w-lg space-y-6">
+                {gamePhase === 'running' && (
+                  <div className="text-center space-y-6">
+                    {/* 목표 시간 표시 */}
+                    <div className="bg-gradient-to-r from-yellow-50 to-orange-50 rounded-lg p-4 border-2 border-yellow-300">
+                      <h4 className="text-xl font-bold text-orange-900 mb-2">
+                        🎯 목표: {targetTime.toFixed(2)}초에 STOP을 누르세요!
+                      </h4>
+                    </div>
+                    
+                    <div className="bg-gradient-to-r from-purple-50 to-indigo-50 rounded-lg p-8 border-2 border-purple-200">
+                      {/* 현재 타이머 */}
+                      <div className="mb-6">
+                        <p className="text-sm text-gray-600 mb-2">현재 시간</p>
+                        <div className={`w-full bg-black text-green-400 rounded-lg p-6 font-mono text-4xl font-bold border-4 border-gray-800 ${
+                          gameRunning ? 'animate-pulse shadow-2xl' : 'shadow-lg'
+                        }`}>
+                          {formatTime(currentTime)}
+                        </div>
+                      </div>
+                      
+                      <button
+                        onClick={stopTimingGame}
+                        disabled={!gameRunning}
+                        className={`px-16 py-6 rounded-lg font-bold text-2xl transition-all duration-300 ${
+                          gameRunning 
+                            ? 'bg-gradient-to-r from-red-500 to-pink-600 text-white hover:from-red-600 hover:to-pink-700 hover:transform hover:scale-110 shadow-lg'
+                            : 'bg-gray-400 text-gray-200 cursor-not-allowed'
+                        }`}
+                      >
+                        🛑 STOP!
+                      </button>
+                    </div>
+                    
+                    <button
+                      onClick={resetTimingGame}
+                      className="px-6 py-3 bg-gray-500 text-white rounded-lg hover:bg-gray-600 font-bold"
+                    >
+                      ❌ 게임 중단
+                    </button>
+                  </div>
+                )}
+                
+                {gamePhase === 'stopped' && (
+                  <div className="text-center space-y-4">
+                    <div className="bg-gradient-to-r from-yellow-50 to-orange-50 rounded-lg p-6 border-2 border-yellow-300">
+                      <h4 className="text-lg font-bold text-orange-900 mb-4">
+                        🔍 결과 확인 중...
+                      </h4>
+                      
+                      <div className="flex justify-center items-center space-x-8">
+                        <div className="text-center">
+                          <p className="text-sm text-gray-600">목표 시간</p>
+                          <div className="bg-yellow-200 rounded-lg p-4 font-mono text-xl font-bold animate-pulse">
+                            {targetTime.toFixed(2)}초
+                          </div>
+                        </div>
+                        
+                        <div className="text-4xl">VS</div>
+                        
+                        <div className="text-center">
+                          <p className="text-sm text-gray-600">멈춘 시간</p>
+                          <div className="bg-purple-200 rounded-lg p-4 font-mono text-xl font-bold">
+                            {(stoppedTime/1000).toFixed(2)}초
+                          </div>
+                        </div>
+                      </div>
+                      
+                      <p className="text-sm text-gray-600 mt-4">
+                        차이: {Math.abs(targetTime * 1000 - stoppedTime)}ms
+                      </p>
                     </div>
                   </div>
-                  <div className="text-right">
-                    <div className="text-lg font-bold">{place.selectedCount}</div>
-                    <div className={`text-xs font-medium ${fairness.color}`}>
-                      {fairness.level}
-                    </div>
-                  </div>
+                )}
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* 주사위 모드 */}
+        {fairnessMode === 'dice' && (
+          <div className="flex flex-col items-center space-y-6">
+            <h3 className="text-xl font-bold text-gray-900 mb-4">🎲 운명의 3D 주사위</h3>
+            
+            {/* 3D 주사위 캔버스 */}
+            <div className="w-full max-w-4xl">
+              <Dice3D 
+                onResult={handle3DDiceResult}
+                shouldRoll={shouldRoll3D}
+                resetRoll={reset3DDice}
+              />
+            </div>
+
+            {/* 장소별 주사위 번호 매핑 표시 */}
+            {!diceRolling && (
+              <div className="w-full max-w-4xl">
+                <div className="bg-blue-50 rounded-lg p-4 mb-4">
+                  <h4 className="text-lg font-bold text-blue-900 mb-2">🎯 주사위 번호 매핑</h4>
+                  <p className="text-sm text-blue-700">각 숫자가 나오면 해당하는 장소가 선정됩니다!</p>
+                </div>
+                
+                <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
+                  {candidatePlaces.slice(0, 6).map((place, index) => {
+                    const diceNum = (index % 6) + 1;
+                    const diceSymbols = ['⚀', '⚁', '⚂', '⚃', '⚄', '⚅'];
+                    return (
+                      <div key={place.id} className={`rounded-lg p-4 flex items-center space-x-3 transition-all ${
+                        diceResult === diceNum 
+                          ? 'bg-yellow-200 border-2 border-yellow-500 shadow-lg transform scale-105' 
+                          : 'bg-gray-50 border border-gray-200'
+                      }`}>
+                        <div className="text-3xl">
+                          {diceSymbols[diceNum - 1]}
+                        </div>
+                        <div className="flex items-center space-x-2 min-w-0 flex-1">
+                          <span className="text-lg">{place.avatar}</span>
+                          <span className="font-medium text-sm truncate">{place.name}</span>
+                        </div>
+                      </div>
+                    );
+                  })}
                 </div>
               </div>
-            );
-          })}
-        </div>
+            )}
 
-        {/* 상세 통계 */}
-        {showFairnessStats && (
-          <div className="mt-4 bg-gray-50 rounded-lg p-3">
-            <h5 className="font-medium text-gray-900 mb-2">선정 이력</h5>
-            <div className="space-y-2 max-h-32 overflow-y-auto">
-              {selectionHistory.slice(-5).reverse().map((history, index) => (
-                <div key={index} className="flex justify-between text-sm">
-                  <span className="text-gray-600">{history.date}</span>
-                  <span className="font-medium">{history.selected}</span>
-                  <span className="text-gray-500">{history.location}</span>
+            <button
+              onClick={startRandomSelection}
+              disabled={diceRolling || candidatePlaces.length === 0}
+              className={`px-8 py-4 rounded-lg font-bold text-lg transition-all duration-300 w-full max-w-md ${
+                diceRolling 
+                  ? 'bg-yellow-500 text-white cursor-not-allowed animate-pulse'
+                  : 'bg-gradient-to-r from-red-500 to-pink-600 text-white hover:from-red-600 hover:to-pink-700 hover:transform hover:scale-105 shadow-lg'
+              }`}
+            >
+              {diceRolling ? (
+                <span>🎲 3D 주사위 굴리는 중...</span>
+              ) : (
+                <span>🎲 운명의 3D 주사위 굴리기!</span>
+              )}
+            </button>
+          </div>
+        )}
+
+        {/* 퀴즈 모드 */}
+        {fairnessMode === 'quiz' && (
+          <div className="flex flex-col items-center space-y-6">
+            <h3 className="text-xl font-bold text-gray-900 mb-4">🧠 스피드 퀴즈 대결</h3>
+            
+            {!quizMode ? (
+              <div className="text-center space-y-4">
+                <div className="bg-blue-50 rounded-lg p-6 max-w-md">
+                  <p className="text-blue-800 font-medium mb-2">💡 게임 방법</p>
+                  <p className="text-sm text-blue-700">
+                    후보 장소 중 하나에 대한 퀴즈가 출제됩니다.<br/>
+                    정답을 맞히면 해당 장소가 최종 선정됩니다!
+                  </p>
                 </div>
-              ))}
-            </div>
+                
+                <button
+                  onClick={startRandomSelection}
+                  disabled={candidatePlaces.length === 0}
+                  className="px-8 py-4 rounded-lg font-bold text-lg transition-all duration-300 w-full max-w-md bg-gradient-to-r from-green-500 to-teal-600 text-white hover:from-green-600 hover:to-teal-700 hover:transform hover:scale-105 shadow-lg"
+                >
+                  🧠 퀴즈 시작하기!
+                </button>
+              </div>
+            ) : (
+              <div className="w-full max-w-2xl space-y-6">
+                <div className="bg-gradient-to-r from-purple-50 to-pink-50 rounded-lg p-6 border-2 border-purple-200">
+                  <h4 className="text-lg font-bold text-purple-900 mb-4">❓ {currentQuiz.question}</h4>
+                  
+                  <div className="grid grid-cols-2 gap-3">
+                    {currentQuiz.answers.map((answer, index) => (
+                      <button
+                        key={index}
+                        onClick={() => setQuizAnswer(answer)}
+                        className={`p-4 rounded-lg border-2 transition-all text-left ${
+                          quizAnswer === answer
+                            ? 'border-purple-500 bg-purple-100 text-purple-800 font-bold'
+                            : 'border-gray-300 bg-white text-gray-700 hover:bg-gray-50'
+                        }`}
+                      >
+                        <span className="font-bold text-purple-600 mr-2">{String.fromCharCode(65 + index)}.</span>
+                        {answer}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+                
+                <div className="flex justify-center space-x-4">
+                  <button
+                    onClick={submitQuizAnswer}
+                    disabled={!quizAnswer}
+                    className="px-6 py-3 bg-green-500 text-white rounded-lg hover:bg-green-600 disabled:opacity-50 disabled:cursor-not-allowed font-bold"
+                  >
+                    ✅ 정답 제출
+                  </button>
+                  <button
+                    onClick={() => {
+                      setQuizMode(false);
+                      setCurrentQuiz(null);
+                      setQuizAnswer('');
+                    }}
+                    className="px-6 py-3 bg-gray-500 text-white rounded-lg hover:bg-gray-600 font-bold"
+                  >
+                    ❌ 취소
+                  </button>
+                </div>
+              </div>
+            )}
           </div>
         )}
       </div>
 
-      {/* SVG 기반 룰렛 */}
-      <div className="bg-white rounded-lg shadow p-6">
-        <div className="text-center">
-          {/* <h2 className="text-lg font-semibold text-gray-900 mb-6 flex items-center justify-center">
-            🎡 룰렛 선정
-          </h2> */}
-          
-          <div className="flex justify-center mb-6">
-            <WheelComponent 
-              segments={candidatePlaces}
-              onFinished={onWheelFinished}
-              isSpinning={spinning}
-              winningSegment={winningSegment}
-              socket={socket}
-              meetingId={meetingId}
-            />
-          </div>
-
-          {/* 스핀 버튼 */}
-          <button
-            onClick={startRandomSelection}
-            disabled={spinning || candidatePlaces.length === 0}
-            className={`px-8 py-4 rounded-lg font-bold text-lg transition-all duration-300 ${
-              spinning 
-                ? 'bg-yellow-500 text-white cursor-not-allowed animate-pulse' 
-                : 'bg-gradient-to-r from-blue-500 to-purple-600 text-white hover:from-blue-600 hover:to-purple-700 hover:transform hover:scale-105 shadow-lg'
-            }`}
-          >
-            {spinning ? (
-              <span>🎲 룰렛 돌리는 중...</span>
-            ) : (
-              <span>
-                🎯 {selectionHistory && selectionHistory.length > 0 
-                  ? '다시 돌리기' 
-                  : `${fairnessModes.find(m => m.id === fairnessMode)?.name}으로 선정하기`
-                }
-              </span>
-            )}
-          </button>
-        </div>
-      </div>
-
-      {/* 결과 표시 */}
-      {result && !spinning && (
-        <div className={`bg-gradient-to-r from-yellow-50 to-orange-50 border-2 border-yellow-300 rounded-lg p-6 shadow-lg transition-all duration-300 ${
-          resultAnimating ? 'animate-bounce' : ''
+      {/* 결과 표시 영역 */}
+      {result && !spinning && !diceRolling && !quizMode && !timingGameMode && (
+        <div className={`bg-gradient-to-r from-yellow-50 to-orange-50 border-2 border-yellow-300 rounded-lg p-6 shadow-2xl ${
+          resultAnimating ? 'animate-pulse' : ''
         }`}>
-          <div className="text-center">
+          <div className="text-center space-y-6">
             {/* 복원된 결과인지 표시 */}
             {result.isRestoredResult && (
               <div className="mb-2">
@@ -868,75 +1502,108 @@ const RandomSelector = ({ meetingId, onLocationSelected }) => {
               </div>
             )}
             
-            <div className={`mb-4 transition-all duration-300 ${
-              resultAnimating ? 'animate-bounce' : ''
-            }`}>
-              <TrophyIcon className="h-16 w-16 text-yellow-500 mx-auto" />
+            {/* 축하 메시지 */}
+            <div className="relative">
+              {resultAnimating && (
+                <div className="absolute -inset-8 flex items-center justify-center pointer-events-none">
+                  <div className="text-6xl animate-bounce">🎉</div>
+                  <div className="text-6xl animate-bounce animation-delay-150">✨</div>
+                  <div className="text-6xl animate-bounce animation-delay-300">🎊</div>
+                </div>
+              )}
+              
+              <div className="flex items-center justify-center mb-4">
+                <TrophyIcon className={`h-12 w-12 text-yellow-500 mr-4 ${resultAnimating ? 'animate-spin' : ''}`} />
+                <div>
+                  <h4 className="text-2xl font-bold text-gray-900 mb-1">
+                    🎉 축하합니다! 🎉
+                  </h4>
+                  <p className="text-lg text-gray-700">
+                    오늘의 운명은 <span className="text-2xl font-bold text-primary-600">{result.selectedPlace.name}</span>입니다!
+                  </p>
+                </div>
+              </div>
             </div>
-            <h4 className="text-2xl font-bold text-gray-900 mb-2">
-              {result.selectedPlace.avatar} {result.message} 🎉 
-            </h4>
-            
-            {/* 공정성 정보 */}
-            {result.fairnessInfo && (
-              <div className="mt-4 bg-white rounded-lg p-4 border border-yellow-200">
-                <h5 className="font-medium text-gray-900 mb-2">공정성 분석</h5>
-                <div className="grid grid-cols-2 gap-4 text-sm">
-                  <div>
-                    <span className="text-gray-600">선정 방식:</span>
-                    <span className="font-medium ml-1">{result.fairnessInfo.mode}</span>
+
+            {/* AI 소개 카드 */}
+            <div className="bg-white/80 backdrop-blur-sm rounded-xl p-6 border border-yellow-200 shadow-lg">
+              <div className="flex items-start space-x-4">
+                <div className="text-4xl">{result.selectedPlace.avatar}</div>
+                <div className="flex-1 text-left">
+                  <h5 className="font-bold text-lg text-gray-900 mb-2">{result.selectedPlace.name}</h5>
+                  <div className="space-y-2 text-sm text-gray-600">
+                    <div className="flex items-center space-x-2">
+                      <span className="font-medium">📍 위치:</span>
+                      <span>{result.selectedPlace.address || '주소 정보 없음'}</span>
+                    </div>
+                    <div className="flex items-center space-x-2">
+                      <span className="font-medium">🏷️ 카테고리:</span>
+                      <span className="bg-blue-100 text-blue-800 px-2 py-1 rounded-full text-xs">
+                        {result.selectedPlace.category}
+                      </span>
+                    </div>
+                    <div className="flex items-center space-x-2">
+                      <span className="font-medium">⭐ 평점:</span>
+                      <span>{result.selectedPlace.rating ? `${result.selectedPlace.rating}점` : '평점 정보 없음'}</span>
+                    </div>
+                    <div className="flex items-center space-x-2">
+                      <span className="font-medium">🗳️ 투표수:</span>
+                      <span>{result.selectedPlace.votes}표</span>
+                    </div>
                   </div>
-                  <div>
-                    <span className="text-gray-600">공정성 점수:</span>
-                    <span className="font-medium ml-1 text-green-600">{result.fairnessInfo.fairnessScore}%</span>
-                  </div>
-                  <div>
-                    <span className="text-gray-600">해당 장소 선정:</span>
-                    <span className="font-medium ml-1">{result.fairnessInfo.placeSelections}회</span>
-                  </div>
-                  <div>
-                    <span className="text-gray-600">그룹 평균:</span>
-                    <span className="font-medium ml-1">{result.fairnessInfo.avgSelections}회</span>
+                  
+                  {/* 선정 방식별 메시지 */}
+                  <div className="mt-4 p-3 bg-gradient-to-r from-blue-50 to-purple-50 rounded-lg border border-blue-200">
+                    <p className="text-sm font-medium text-blue-800">
+                      {result.selectionMethod === 'dice' && '🎲 주사위의 선택'}
+                      {result.selectionMethod === 'quiz' && '🧠 퀴즈 정답 보상'}
+                      {result.selectionMethod === 'timing' && '⏱️ 타이밍 게임 승리'}
+                      {!result.selectionMethod && '🎯 룰렛의 선택'}
+                    </p>
+                    <p className="text-xs text-blue-600 mt-1">
+                      {result.message}
+                    </p>
                   </div>
                 </div>
               </div>
-            )}
-
-            {/* 선정된 참가자 정보 */}
-            {/* <div className="mt-4 flex items-center justify-center">
-              <span className="text-4xl mr-3">{result.selectedParticipant.avatar}</span>
-              <div>
-                <h5 className="text-xl font-bold text-gray-900">{result.selectedParticipant.name}</h5>
-                <p className="text-gray-600">{result.selectedParticipant.location}</p>
-              </div>
-            </div> */}
-
-            {/* 새로운 선정 버튼 (복원된 결과일 때만 표시) */}
-            {/* {result.isRestoredResult && (
-              <div className="mt-4">
-                <button
-                  onClick={startRandomSelection}
-                  disabled={spinning || participants.length === 0}
-                  className="px-6 py-2 bg-blue-500 text-white rounded-lg hover:bg-blue-600 transition-colors"
-                >
-                  🎯 다시 돌리기
-                </button>
             </div>
-            )} */}
-          </div>
-        </div>
-      )}
+            
+            {/* 액션 버튼들 */}
+            <div className="flex justify-center space-x-4">
+                              <button
+                  onClick={startRandomSelection}
+                  disabled={spinning || diceRolling || quizMode || candidatePlaces.length === 0}
+                  className="px-6 py-3 bg-gradient-to-r from-blue-500 to-blue-600 text-white rounded-lg hover:from-blue-600 hover:to-blue-700 transition-all duration-200 font-bold flex items-center gap-2 shadow-lg hover:shadow-xl transform hover:scale-105"
+                >
+                  🎯 다시 도전하기
+                </button>
+              <button
+                onClick={clearResult}
+                className="px-6 py-3 bg-gradient-to-r from-gray-500 to-gray-600 text-white rounded-lg hover:from-gray-600 hover:to-gray-700 transition-all duration-200 font-bold flex items-center gap-2 shadow-lg hover:shadow-xl transform hover:scale-105"
+              >
+                🗑️ 결과 초기화
+              </button>
+            </div>
 
-      {!result && !spinning && (
-        <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
-          <div className="flex items-start">
-            <ScaleIcon className="h-5 w-5 text-blue-500 mr-2 mt-0.5" />
-            <div>
-              <h5 className="font-medium text-blue-900 mb-1">🎡 SVG 고품질 룰렛 시스템</h5>
-              <p className="text-sm text-blue-700">
-                SVG 기반의 선명하고 부드러운 룰렛 애니메이션으로 
-                후보 장소 이름이 명확하게 보이는 고품질 경험을 제공합니다!
-              </p>
+            {/* 공유 버튼 (추가 기능) */}
+            <div className="pt-4 border-t border-yellow-200">
+              <button
+                onClick={() => {
+                  const shareText = `🎉 "${result.selectedPlace.name}"이(가) 선정되었습니다!\n\n📍 ${result.selectedPlace.address}\n⭐ ${result.selectedPlace.rating}점\n\n#wherewemeets #장소선정`;
+                  if (navigator.share) {
+                    navigator.share({
+                      title: '장소 선정 결과',
+                      text: shareText
+                    });
+                  } else {
+                    navigator.clipboard.writeText(shareText);
+                    alert('결과가 클립보드에 복사되었습니다!');
+                  }
+                }}
+                className="text-sm text-blue-600 hover:text-blue-800 font-medium flex items-center gap-1 mx-auto"
+              >
+                📱 결과 공유하기
+              </button>
             </div>
           </div>
         </div>

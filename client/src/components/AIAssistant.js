@@ -1,15 +1,32 @@
-import React, { useState, useRef, useEffect } from 'react';
+import React, { useState, useRef, useEffect, useCallback } from 'react';
 import api from '../utils/api';
 import { useAuth } from '../contexts/AuthContext';
+import { cleanAIResponse } from '../utils/placeUtils';
 import './AIAssistant.css';
 
 const AIAssistant = ({ meetingData, onPlaceRecommendation }) => {
   const { user, isAuthenticated } = useAuth();
   
+  // 사용자별 고유 저장 키 생성
+  const getChatHistoryKey = useCallback(() => {
+    if (isAuthenticated && user?.id) {
+      // 로그인한 사용자: userId 기반
+      return `aiAssistant_chatHistory_${user.id}`;
+    } else {
+      // 게스트 사용자: 게스트 ID 기반
+      const guestId = localStorage.getItem('guestUserId') || 'guest-' + Date.now();
+      if (!localStorage.getItem('guestUserId')) {
+        localStorage.setItem('guestUserId', guestId);
+      }
+      return `aiAssistant_chatHistory_${guestId}`;
+    }
+  }, [isAuthenticated, user?.id]);
+
   // localStorage에서 채팅 히스토리 복원
-  const getStoredMessages = () => {
+  const getStoredMessages = useCallback(() => {
     try {
-      const stored = localStorage.getItem('aiAssistant_chatHistory');
+      const chatHistoryKey = getChatHistoryKey();
+      const stored = localStorage.getItem(chatHistoryKey);
       if (stored) {
         const parsedMessages = JSON.parse(stored);
         // timestamp를 Date 객체로 변환
@@ -26,32 +43,47 @@ const AIAssistant = ({ meetingData, onPlaceRecommendation }) => {
     return [
     {
       role: 'ai',
-      content: '안녕하세요! 미팅 장소 추천 AI 도우미입니다. 🤖\n\n어떤 종류의 미팅이신가요? 참여자 수, 지역, 예산, 목적 등을 알려주시면 최적의 장소를 추천해드릴게요!',
+      content: '안녕하세요! 미팅 장소 추천 AI 도우미입니다. 🤖\n\n어떤 종류의 미팅이신가요? 참여자 수, 지역, 예산, 목적, 날씨, 교통 등을 알려주시면 최적의 장소를 추천해드릴게요!',
       timestamp: new Date()
     }
     ];
-  };
+  }, [getChatHistoryKey]);
 
   const [messages, setMessages] = useState(getStoredMessages);
   const [inputMessage, setInputMessage] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState(null);
+  const [shouldScroll, setShouldScroll] = useState(true);
   const messagesEndRef = useRef(null);
+  const isInitialMount = useRef(true);
 
-  // 메시지 스크롤을 맨 아래로
-  const scrollToBottom = () => {
-    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
-  };
+  // // 메시지 스크롤을 맨 아래로
+  // const scrollToBottom = () => {
+  //   messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
+  // };
 
   // 메시지가 변경될 때마다 localStorage에 저장
   useEffect(() => {
     try {
-      localStorage.setItem('aiAssistant_chatHistory', JSON.stringify(messages));
+      const chatHistoryKey = getChatHistoryKey();
+      localStorage.setItem(chatHistoryKey, JSON.stringify(messages));
     } catch (error) {
       console.error('채팅 히스토리 저장 실패:', error);
     }
-    scrollToBottom();
-  }, [messages]);
+    
+    // // 초기 마운트가 아니고 shouldScroll이 true일 때만 스크롤
+    // if (!isInitialMount.current && shouldScroll) {
+    //   scrollToBottom();
+    // }
+    
+    // 초기 마운트 플래그 해제
+    if (isInitialMount.current) {
+      isInitialMount.current = false;
+    }
+    
+    // 스크롤 플래그 리셋
+    setShouldScroll(true);
+  }, [messages, shouldScroll, getChatHistoryKey]);
 
   // 컨텍스트 정보 생성 (대화 히스토리 포함)
   const generateContext = () => {
@@ -79,36 +111,49 @@ const AIAssistant = ({ meetingData, onPlaceRecommendation }) => {
   const sendMessage = async () => {
     if (!inputMessage.trim() || isLoading) return;
 
-    // 인증 확인
-    if (!isAuthenticated) {
-      const errorMessage = '🔒 AI 도우미를 사용하려면 로그인이 필요합니다.';
-      setError(errorMessage);
+    // 게스트 사용자 사용량 체크 (장소 추천 키워드가 포함된 경우)
+    const isPlaceRecommendation = inputMessage.toLowerCase().includes('추천') || 
+                                 inputMessage.toLowerCase().includes('장소') ||
+                                 inputMessage.toLowerCase().includes('곳') ||
+                                 inputMessage.toLowerCase().includes('카페') ||
+                                 inputMessage.toLowerCase().includes('음식점') ||
+                                 inputMessage.toLowerCase().includes('레스토랑') ||
+                                 inputMessage.toLowerCase().includes('맛집') ||
+                                 inputMessage.toLowerCase().includes('공원') ||
+                                 inputMessage.toLowerCase().includes('만날') ||
+                                 inputMessage.toLowerCase().includes('미팅');
+
+    if (!isAuthenticated && isPlaceRecommendation) {
+      const today = new Date().toDateString();
+      const lastUsageDate = localStorage.getItem('guestAIUsageDate');
+      let guestUsage = 0;
       
-      const errorChatMessage = {
-        role: 'error',
-        content: errorMessage,
-        timestamp: new Date()
-      };
+      // 날짜가 바뀌었으면 사용량 리셋
+      if (lastUsageDate !== today) {
+        localStorage.setItem('guestAIUsageDate', today);
+        localStorage.setItem('guestAIUsage', '0');
+        guestUsage = 0;
+      } else {
+        guestUsage = parseInt(localStorage.getItem('guestAIUsage') || '0');
+      }
       
-      setMessages(prev => [...prev, errorChatMessage]);
-      return;
+      if (guestUsage >= 3) {
+        const errorMessage = '🔒 오늘의 AI 장소 추천 사용량이 모두 소진되었습니다. 내일 자정에 다시 이용하거나 회원가입하여 더 많은 혜택을 받아보세요!';
+        setError(errorMessage);
+        
+        const errorChatMessage = {
+          role: 'error',
+          content: errorMessage,
+          timestamp: new Date()
+        };
+        
+        setMessages(prev => [...prev, errorChatMessage]);
+        return;
+      }
     }
 
-    // 로컬 스토리지에서 토큰 가져오기
+    // 로컬 스토리지에서 토큰 가져오기 (게스트는 토큰 없이도 가능)
     const token = localStorage.getItem('token');
-    if (!token) {
-      const errorMessage = '🔒 로그인 토큰이 없습니다. 다시 로그인해주세요.';
-      setError(errorMessage);
-      
-      const errorChatMessage = {
-        role: 'error',
-        content: errorMessage,
-        timestamp: new Date()
-      };
-      
-      setMessages(prev => [...prev, errorChatMessage]);
-      return;
-    }
 
     const userMessage = {
       role: 'user',
@@ -122,19 +167,58 @@ const AIAssistant = ({ meetingData, onPlaceRecommendation }) => {
     setError(null);
 
     try {
+      // 헤더 설정 (토큰이 있으면 추가)
+      const config = {};
+      if (token) {
+        config.headers = {
+          'Authorization': `Bearer ${token}`
+        };
+      }
+
       const response = await api.post('/aiAssistant/chat', {
         message: userMessage.content,
         context: generateContext()
-      });
+      }, config);
 
       if (response.data.success) {
+        // AI 응답에서 URL과 불필요한 정보를 정리
+        const cleanedResponse = cleanAIResponse(response.data.data.response);
+        
         const aiMessage = {
           role: 'ai',
-          content: response.data.data.response,
+          content: cleanedResponse,
           timestamp: new Date()
         };
         
         setMessages(prev => [...prev, aiMessage]);
+
+        // 게스트 사용자의 경우 일일 장소 추천 사용량 증가
+        if (!isAuthenticated && isPlaceRecommendation) {
+          const today = new Date().toDateString();
+          const lastUsageDate = localStorage.getItem('guestAIUsageDate');
+          let currentUsage = 0;
+          
+          // 날짜가 바뀌었으면 사용량 리셋
+          if (lastUsageDate !== today) {
+            localStorage.setItem('guestAIUsageDate', today);
+            localStorage.setItem('guestAIUsage', '0');
+            currentUsage = 0;
+          } else {
+            currentUsage = parseInt(localStorage.getItem('guestAIUsage') || '0');
+          }
+          
+          const newUsage = currentUsage + 1;
+          localStorage.setItem('guestAIUsage', newUsage.toString());
+          
+          if (newUsage >= 3) {
+            const limitMessage = {
+              role: 'ai',
+              content: '⚠️ 오늘의 AI 추천 사용량이 모두 소진되었습니다. 내일 자정에 다시 이용하거나 회원가입하여 더 많은 혜택을 받아보세요!',
+              timestamp: new Date()
+            };
+            setMessages(prev => [...prev, limitMessage]);
+          }
+        }
       } else {
         throw new Error(response.data.message || 'AI 응답을 받을 수 없습니다.');
       }
@@ -197,6 +281,9 @@ const AIAssistant = ({ meetingData, onPlaceRecommendation }) => {
       
       onPlaceRecommendation(placeData);
       
+      // 스크롤 방지 플래그 설정
+      setShouldScroll(false);
+      
       // 성공 메시지 추가
       const successMessage = {
         role: 'ai',
@@ -207,32 +294,94 @@ const AIAssistant = ({ meetingData, onPlaceRecommendation }) => {
     }
   };
 
+  // 장소명을 기반으로 카테고리 자동 분류
+  const categorizePlace = (placeName) => {
+    if (!placeName) return 'other';
+    
+    const name = placeName.toLowerCase();
+    
+    // 카페 관련 키워드
+    const cafeKeywords = ['카페', 'cafe', '커피', 'coffee', '스타벅스', '이디야', '투썸', '할리스', '파스쿠찌', '엔젤리너스', '커피빈', '컴포즈커피', '빽다방', '메가커피', '더벤티'];
+    if (cafeKeywords.some(keyword => name.includes(keyword))) {
+      return 'cafe';
+    }
+    
+    // 공원 관련 키워드
+    const parkKeywords = ['공원', 'park', '한강공원', '올림픽공원', '월드컵공원', '보라매공원', '어린이대공원', '서울숲', '남산공원', '경의선숲길', '선유도공원', '양재천', '청계천', '반포한강공원'];
+    if (parkKeywords.some(keyword => name.includes(keyword))) {
+      return 'park';
+    }
+    
+    // 오락시설 관련 키워드
+    const entertainmentKeywords = ['노래방', '볼링', '당구', '스크린골프', '보드게임', '방탈출', '피시방', 'pc방', '게임', '오락실', '롤링볼', '클라이밍', '영화관', 'cgv', '메가박스', '롯데시네마'];
+    if (entertainmentKeywords.some(keyword => name.includes(keyword))) {
+      return 'entertainment';
+    }
+    
+    // 쇼핑 관련 키워드
+    const shoppingKeywords = ['쇼핑몰', '백화점', '마트', '아울렛', '롯데월드몰', '코엑스몰', '신세계', '롯데백화점', '현대백화점', '갤러리아', '더현대', '이마트', '홈플러스', '롯데마트'];
+    if (shoppingKeywords.some(keyword => name.includes(keyword))) {
+      return 'shopping';
+    }
+    
+    // 술집/바 관련 키워드
+    const barKeywords = ['술집', '호프', '맥주', '치킨', '바', 'bar', '펜션', '이자카야', 'pub'];
+    if (barKeywords.some(keyword => name.includes(keyword))) {
+      return 'restaurant'; // 술집도 음식점 카테고리로 분류
+    }
+    
+    // 특정 음식점 브랜드나 음식 키워드
+    const restaurantKeywords = ['맛집', '식당', '레스토랑', '한식', '중식', '일식', '양식', '분식', '김밥', '냉면', '갈비', '삼겹살', '불고기', '피자', '치킨', '햄버거', '파스타', '스시', '라면', '국수', '찌개', '전골', '구이', 'bbq', 'kfc', '맥도날드', '버거킹', '롯데리아', '파리바게뜨', '뚜레쥬르'];
+    if (restaurantKeywords.some(keyword => name.includes(keyword))) {
+      return 'restaurant';
+    }
+    
+    // 기본값은 음식점으로 설정 (기존 동작 유지)
+    return 'restaurant';
+  };
+
   // AI 응답에서 장소명 추출
   const extractPlacesFromResponse = (content) => {
     const places = [];
     
-    // 패턴 1: **1. 장소명** 또는 **장소명**
-    const pattern1 = /\*\*(?:\d+\.\s*)?([^*]+)\*\*/g;
+    // 패턴 1: 1. 장소명 또는 2. 장소명 등 (숫자와 점으로 시작)
+    const pattern1 = /(\d+\.\s*)([^\n\r:]+)/g;
     let match;
     while ((match = pattern1.exec(content)) !== null) {
-      const placeName = match[1].trim();
-      if (placeName && placeName.length > 1 && placeName.length < 50) {
+      const placeName = match[2].trim();
+      // 한글, 영어, 숫자를 포함하고 있고, 너무 길지 않은 경우만
+      if (placeName && placeName.match(/[가-힣a-zA-Z0-9]/) && placeName.length < 50) {
         places.push({
           name: placeName,
-          category: 'restaurant', // 기본값
+          category: categorizePlace(placeName), // 자동 카테고리 분류
           address: ''
         });
       }
     }
     
     // 패턴 2: - 장소명: 또는 • 장소명:
-    const pattern2 = /[•\-]\s*([^:]+):/g;
+    const pattern2 = /[•-]\s*([^:\n\r]+):/g;
     while ((match = pattern2.exec(content)) !== null) {
       const placeName = match[1].trim();
-      if (placeName && placeName.length > 1 && placeName.length < 50) {
+      if (placeName && placeName.match(/[가-힣a-zA-Z0-9]/) && placeName.length < 50) {
         places.push({
           name: placeName,
-          category: 'restaurant',
+          category: categorizePlace(placeName), // 자동 카테고리 분류
+          address: ''
+        });
+      }
+    }
+    
+    // 패턴 3: **장소명** (기존 패턴도 유지)
+    const pattern3 = /\*\*([^*\n\r]+)\*\*/g;
+    while ((match = pattern3.exec(content)) !== null) {
+      const placeName = match[1].trim();
+      // 숫자와 점으로 시작하는 경우 제거 (예: "1. 스타벅스" -> "스타벅스")
+      const cleanedName = placeName.replace(/^\d+\.\s*/, '');
+      if (cleanedName && cleanedName.match(/[가-힣a-zA-Z0-9]/) && cleanedName.length < 50) {
+        places.push({
+          name: cleanedName,
+          category: categorizePlace(cleanedName), // 자동 카테고리 분류
           address: ''
         });
       }
@@ -252,11 +401,12 @@ const AIAssistant = ({ meetingData, onPlaceRecommendation }) => {
     if (confirmClear) {
       const initialMessage = {
         role: 'ai',
-        content: '안녕하세요! 미팅 장소 추천 AI 도우미입니다. 🤖\n\n어떤 종류의 미팅이신가요? 참여자 수, 지역, 예산, 목적 등을 알려주시면 최적의 장소를 추천해드릴게요!',
+        content: '안녕하세요! 미팅 장소 추천 AI 도우미입니다. 🤖\n\n어떤 종류의 미팅이신가요? 참여자 수, 지역, 예산, 목적, 날씨, 교통 등을 알려주시면 최적의 장소를 추천해드릴게요!',
         timestamp: new Date()
       };
       setMessages([initialMessage]);
-      localStorage.removeItem('aiAssistant_chatHistory');
+      const chatHistoryKey = getChatHistoryKey();
+      localStorage.removeItem(chatHistoryKey);
     }
   };
 

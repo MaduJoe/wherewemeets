@@ -155,7 +155,7 @@ const MeetingPlannerPage = () => {
           id: id,
           title: meetingTitle,
           description: isSharedMeeting ? '공유 링크를 통해 참여한 미팅입니다' : '장소를 선택하고 친구들과 투표해보세요',
-          category: 'restaurant',
+          category: 'all', // 기본값을 'all'로 변경
           participants: [],
           candidatePlaces: [],
           status: 'planning'
@@ -176,7 +176,7 @@ const MeetingPlannerPage = () => {
         id: id || `meeting-${Date.now()}`,
         title: (user && !user.isGuest) ? `${user.name}님의 미팅` : '새 미팅',
         description: '장소를 선택하고 친구들과 투표해보세요',
-        category: 'restaurant',
+        category: 'all', // 기본값을 'all'로 변경
         participants: [],
         candidatePlaces: [],
         status: 'planning'
@@ -242,9 +242,11 @@ const MeetingPlannerPage = () => {
 
           setMeeting(prev => {
             if (!prev) return prev;
+            const dynamicCategory = getMeetingCategory(updatedCandidates);
             return {
               ...prev,
-              candidatePlaces: updatedCandidates
+              candidatePlaces: updatedCandidates,
+              category: dynamicCategory // 동적으로 카테고리 업데이트
             };
           });
         }
@@ -352,28 +354,58 @@ const MeetingPlannerPage = () => {
       console.log('API 설정 확인:', {
         baseURL: api.defaults.baseURL,
         requestURL: `/votes/${meeting.id}/candidates`,
-        fullURL: `${api.defaults.baseURL}/votes/${meeting.id}/candidates`
+        fullURL: `${api.defaults.baseURL}/votes/${meeting.id}/candidates`,
+        meetingId: meeting.id
       });
+
+      // 먼저 서버 상태 확인
+      try {
+        const healthCheck = await api.get('/health');
+        console.log('서버 상태 확인:', healthCheck.data);
+      } catch (healthError) {
+        console.error('서버 상태 확인 실패:', healthError);
+        throw new Error('서버에 연결할 수 없습니다. 서버가 실행 중인지 확인해주세요.');
+      }
 
       // 투표 API를 사용하여 후보 장소 추가
       const response = await api.post(`/votes/${meeting.id}/candidates`, {
         place: placeData
       });
       
+      console.log('서버 응답:', response);
+      console.log('응답 데이터:', response.data);
+      console.log('응답 타입:', typeof response.data);
+      
+      // HTML 응답인지 확인
+      if (typeof response.data === 'string' && response.data.includes('<html>')) {
+        console.error('서버에서 HTML 응답을 받았습니다. API 엔드포인트가 잘못되었거나 서버 설정에 문제가 있습니다.');
+        throw new Error('서버 설정 오류: HTML 응답을 받았습니다.');
+      }
+      
       if (response.data.success) {
         alert(response.data.data.message);
         // 미팅 상태 즉시 업데이트
-        setMeeting(prevMeeting => ({
-          ...prevMeeting,
-          candidatePlaces: response.data.data.candidatePlaces
-        }));
+        setMeeting(prevMeeting => {
+          const updatedCandidates = response.data.data.candidatePlaces;
+          const dynamicCategory = getMeetingCategory(updatedCandidates);
+          return {
+            ...prevMeeting,
+            candidatePlaces: updatedCandidates,
+            category: dynamicCategory // 동적으로 카테고리 업데이트
+          };
+        });
       } else {
         alert(response.data.message);
       }
 
     } catch (error) {
       console.error('장소 추가 실패 API 에러:', error);
+      console.error('에러 응답 데이터:', error.response?.data);
+      console.error('에러 상태:', error.response?.status);
+      console.error('에러 헤더:', error.response?.headers);
+      
       if (error.response && error.response.data) {
+        console.error('서버 에러 메시지:', error.response.data.message);
         alert(error.response.data.message || '장소 추가 중 오류가 발생했습니다.');
       } else {
         alert('장소 추가 요청 중 오류가 발생했습니다.');
@@ -456,9 +488,9 @@ const MeetingPlannerPage = () => {
     }
   ];
 
-  // 주최자가 아니면 투표와 최종결정 탭만 표시
+  // 주최자가 아니면 검색 기반 장소, 투표, 최종결정 탭 표시
   const tabs = !isOwner 
-    ? allTabs.filter(tab => tab.id === 'voting' || tab.id === 'random')
+    ? allTabs.filter(tab => tab.id === 'recommendation' || tab.id === 'voting' || tab.id === 'random')
     : allTabs;
 
   // 역할에 따른 기본 탭 설정
@@ -471,12 +503,54 @@ const MeetingPlannerPage = () => {
     // 약간의 지연을 두어 토큰 저장이 완료되도록 함
     setTimeout(() => {
       if (!isOwner && activeTab === 'recommendation') {
-        console.log('참여자로 인식 - voting 탭으로 변경');
-        setActiveTab('voting');
+        console.log('참여자로 인식 - recommendation 탭 유지 (이제 참여자도 장소 검색 가능)');
+        // 참여자도 recommendation 탭을 사용할 수 있으므로 탭 변경하지 않음
       }
-      // 주최자는 이미 기본값이 'recommendation'이므로 별도 처리 불필요
+      // 주최자와 참여자 모두 기본값이 'recommendation'
     }, 100);
   }, [isOwner, activeTab, id]);
+
+  // 후보 장소들을 기반으로 미팅 카테고리 결정하는 함수
+  const getMeetingCategory = (candidatePlaces) => {
+    if (!candidatePlaces || candidatePlaces.length === 0) {
+      return 'all';
+    }
+
+    // 카테고리별 개수 계산
+    const categoryCount = {};
+    candidatePlaces.forEach(place => {
+      const category = place.category || 'other';
+      categoryCount[category] = (categoryCount[category] || 0) + 1;
+    });
+
+    // 가장 많은 카테고리 찾기
+    const entries = Object.entries(categoryCount);
+    if (entries.length === 0) return 'all';
+    
+    // 동일한 개수의 카테고리가 여러 개면 'mixed' 반환
+    entries.sort(([,a], [,b]) => b - a);
+    if (entries.length > 1 && entries[0][1] === entries[1][1]) {
+      return 'mixed';
+    }
+    
+    return entries[0][0];
+  };
+
+  // 카테고리를 한국어로 변환하는 함수
+  const getCategoryLabel = (category) => {
+    const categoryLabels = {
+      'all': '전체',
+      'mixed': '다양한 카테고리',
+      'restaurant': '음식점',
+      'cafe': '카페',
+      'park': '공원',
+      'entertainment': '오락시설',
+      'shopping': '쇼핑',
+      'culture': '문화시설',
+      'other': '기타'
+    };
+    return categoryLabels[category] || category;
+  };
 
   if (loading) {
     return (
@@ -504,7 +578,7 @@ const MeetingPlannerPage = () => {
                 <div className="ml-3">
                   <p className="text-sm text-blue-800">
                     <span className="font-medium">투표 참여자로 접속하였습니다.</span>
-                    {' '}투표와 최종 결정에 참여해서 의견을 나눠보세요!
+                    {' '}장소를 검색하고 투표에 참여해서 의견을 나눠보세요!
                   </p>
                 </div>
               </div>
@@ -537,12 +611,21 @@ const MeetingPlannerPage = () => {
               <span className="bg-green-100 text-green-800 text-sm font-medium px-3 py-1 rounded-full">
                 {meeting?.status === 'planning' ? '계획 중' : '완료'}
               </span>
-              <button
-                onClick={() => navigate('/dashboard')}
-                className="text-gray-600 hover:text-gray-900"
-              >
-                대시보드로 돌아가기
-              </button>
+              {user?.isGuest ? (
+                <button
+                  onClick={() => navigate('/')}
+                  className="text-gray-600 hover:text-gray-900"
+                >
+                  홈으로 돌아가기
+                </button>
+              ) : (
+                <button
+                  onClick={() => navigate('/dashboard')}
+                  className="text-gray-600 hover:text-gray-900"
+                >
+                  대시보드로 돌아가기
+                </button>
+              )}
             </div>
           </div>
         </div>
@@ -608,9 +691,7 @@ const MeetingPlannerPage = () => {
                   <div className="flex justify-between">
                     <span className="text-gray-600">카테고리</span>
                     <span className="font-medium">
-                      {meeting?.category === 'restaurant' ? '음식점' :
-                       meeting?.category === 'cafe' ? '카페' :
-                       meeting?.category === 'entertainment' ? '오락시설' : '기타'}
+                      {getCategoryLabel(meeting?.category)}
                     </span>
                   </div>
                 </div>
@@ -641,6 +722,7 @@ const MeetingPlannerPage = () => {
                 meetingId={meeting?.id}
                 currentUserId={1}
                 candidatePlaces={meeting?.candidatePlaces}
+                onTabChange={setActiveTab}
               />
             )}
 

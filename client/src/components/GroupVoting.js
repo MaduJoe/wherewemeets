@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import api from '../utils/api';
+import { formatVoteTime, formatRelativeTime } from '../utils/dateUtils';
 import { 
   HandThumbUpIcon,
   ChatBubbleLeftRightIcon,
@@ -149,7 +150,7 @@ const saveMeetingHistory = async (user, meetingData) => {
   }
 };
 
-const GroupVoting = ({ meetingId, currentUserId = 1, candidatePlaces }) => {
+const GroupVoting = ({ meetingId, currentUserId = 1, candidatePlaces, onTabChange }) => {
   const { user } = useAuth();
   const [meeting, setMeeting] = useState(null);
   const [loading, setLoading] = useState(false);
@@ -170,6 +171,16 @@ const GroupVoting = ({ meetingId, currentUserId = 1, candidatePlaces }) => {
     if (!meetingId) return false;
     return isHost(meetingId);
   }, [meetingId]);
+
+  // 카테고리 정의 (PlaceExplorer와 동일)
+  const categories = [
+    { value: 'all', label: '전체', icon: '🌟' },
+    { value: 'restaurant', label: '음식점', icon: '🍽️' },
+    { value: 'cafe', label: '카페', icon: '☕' },
+    { value: 'park', label: '공원', icon: '🌳' },
+    { value: 'entertainment', label: '오락시설', icon: '🎮' },
+    { value: 'shopping', label: '쇼핑', icon: '🛍️' }
+  ];
 
   // meetingId가 있지만 meeting 객체가 없을 때 기본 meeting 객체 생성
   useEffect(() => {
@@ -260,6 +271,17 @@ const GroupVoting = ({ meetingId, currentUserId = 1, candidatePlaces }) => {
     }, 3000); // 3초마다 업데이트
 
     return () => clearInterval(interval);
+  }, [meetingId]);
+
+  // 실시간 채팅 메시지 업데이트 (폴링)
+  useEffect(() => {
+    if (!meetingId) return;
+
+    const chatInterval = setInterval(() => {
+      loadChatMessages();
+    }, 2000); // 2초마다 채팅 메시지 업데이트
+
+    return () => clearInterval(chatInterval);
   }, [meetingId]);
 
   // 투표 데이터와 meeting 상태를 동기화
@@ -373,27 +395,52 @@ const GroupVoting = ({ meetingId, currentUserId = 1, candidatePlaces }) => {
     }
   };
 
-  // 임시 채팅 메시지
-  useEffect(() => {
-    setChatMessages([
-      { 
-        id: 1, 
-        userId: 1, 
-        userName: '김철수', 
-        message: '강남 쪽이 어떨까요?', 
-        timestamp: new Date(),
-        reactions: { '👍': 2, '❤️': 1 }
-      },
-      { 
-        id: 2, 
-        userId: 2, 
-        userName: '이영희', 
-        message: '홍대도 좋을 것 같아요!', 
-        timestamp: new Date(),
-        reactions: { '🎉': 1, '👍': 3 }
+  // 서버에서 채팅 메시지 로드
+  const loadChatMessages = async () => {
+    if (!meetingId) return;
+    
+    try {
+      const response = await api.get(`/chat/${meetingId}`);
+      if (response.data.success && response.data.data.messages) {
+        // 메시지 데이터 검증 및 정리
+        const validMessages = response.data.data.messages.filter(msg => {
+          // 필수 필드 검증
+          if (!msg.userName || !msg.message) {
+            console.warn('Invalid message format:', msg);
+            return false;
+          }
+          
+          // 날짜 필드 정리 (timestamp 또는 createdAt)
+          if (!msg.timestamp && msg.createdAt) {
+            msg.timestamp = msg.createdAt;
+          }
+          
+          return true;
+        });
+        
+        setChatMessages(validMessages);
       }
-    ]);
-  }, []);
+    } catch (error) {
+      console.error('채팅 메시지 로드 실패:', error);
+      setChatMessages([]);
+    }
+  };
+
+  // 채팅 메시지 초기화 및 자동 업데이트 (서버에서 로드)
+  useEffect(() => {
+    if (meetingId) {
+      loadChatMessages();
+      
+      // 2초마다 채팅 메시지 업데이트 (실시간 느낌)
+      const chatInterval = setInterval(() => {
+        loadChatMessages();
+      }, 2000);
+      
+      return () => {
+        clearInterval(chatInterval);
+      };
+    }
+  }, [meetingId]);
 
   const loadMeeting = async () => {
     try {
@@ -533,33 +580,41 @@ const GroupVoting = ({ meetingId, currentUserId = 1, candidatePlaces }) => {
   };
 
   // 채팅 메시지에 반응 추가
-  const addMessageReaction = (messageId, emoji) => {
-    setChatMessages(prev => prev.map(msg => {
-      if (msg.id === messageId) {
-        return {
-          ...msg,
-          reactions: {
-            ...msg.reactions,
-            [emoji]: (msg.reactions?.[emoji] || 0) + 1
-          }
-        };
+  const addMessageReaction = async (messageId, emoji) => {
+    if (!meetingId) return;
+
+    try {
+      const response = await api.post(`/chat/${meetingId}/messages/${messageId}/reactions`, {
+        emoji: emoji
+      });
+      
+      if (response.data.success) {
+        // 반응 추가 성공 시 채팅 메시지 새로고침
+        await loadChatMessages();
       }
-      return msg;
-    }));
+    } catch (error) {
+      console.error('반응 추가 실패:', error);
+    }
   };
 
-  const addChatMessage = () => {
-    if (newMessage.trim() && currentParticipant) {
-      const message = {
-        id: (chatMessages?.length || 0) + 1,
-        userId: currentParticipant.id,
-        userName: currentParticipant.name,
-        message: newMessage,
-        timestamp: new Date(),
-        reactions: {}
-      };
-      setChatMessages([...chatMessages, message]);
-      setNewMessage('');
+  const addChatMessage = async () => {
+    if (newMessage.trim() && currentParticipant && meetingId) {
+      try {
+        const response = await api.post(`/chat/${meetingId}/messages`, {
+          userId: currentParticipant.id,
+          userName: currentParticipant.name,
+          message: newMessage.trim()
+        });
+        
+        if (response.data.success) {
+          // 메시지 전송 성공 시 즉시 채팅 메시지 새로고침
+          await loadChatMessages();
+          setNewMessage('');
+        }
+      } catch (error) {
+        console.error('메시지 전송 실패:', error);
+        alert('메시지 전송에 실패했습니다. 다시 시도해주세요.');
+      }
     }
   };
 
@@ -630,20 +685,44 @@ const GroupVoting = ({ meetingId, currentUserId = 1, candidatePlaces }) => {
     let selectedPlace = null;
     
     if (winningResult.places.length === 1) {
+      // 1등이 명확한 경우 바로 확정
       selectedPlace = winningResult.places[0];
     } else {
-      // 동점인 경우 사용자가 선택
-      const placeNames = winningResult.places.map((place, index) => `${index + 1}. ${place.name}`).join('\n');
-      const choice = window.prompt(
-        `동점 장소가 ${winningResult.places.length}개 있습니다. 최종 장소를 선택해주세요:\n\n${placeNames}\n\n번호를 입력하세요 (1-${winningResult.places.length}):`
+      // 동점인 경우 최종결정 탭으로 이동
+      const placeNames = winningResult.places.map(place => place.name).join(', ');
+      
+      const shouldMoveTo = window.confirm(
+        `🏆 동점 장소가 ${winningResult.places.length}개 있습니다!\n\n` +
+        `📍 동점 장소: ${placeNames}\n\n` +
+        `"최종결정" 탭에서 룰렛을 돌려 최종 장소를 결정하시겠습니까?\n\n` +
+        `확인: 최종결정 탭으로 이동\n` +
+        `취소: 현재 화면에서 직접 선택`
       );
       
-      const choiceNum = parseInt(choice);
-      if (choiceNum >= 1 && choiceNum <= winningResult.places.length) {
-        selectedPlace = winningResult.places[choiceNum - 1];
+      if (shouldMoveTo) {
+        // 최종결정 탭으로 이동
+        if (onTabChange) {
+          onTabChange('random');
+          return;
+        } else {
+          alert('탭 변경 기능이 사용할 수 없습니다. 직접 "최종결정" 탭을 클릭해주세요.');
+          return;
+        }
       } else {
-        alert('잘못된 선택입니다.');
-        return;
+        // 기존 방식으로 직접 선택
+        const placeNames = winningResult.places.map((place, index) => `${index + 1}. ${place.name}`).join('\n');
+        const choice = window.prompt(
+          `동점 장소가 ${winningResult.places.length}개 있습니다. 최종 장소를 선택해주세요:\n\n${placeNames}\n\n번호를 입력하세요 (1-${winningResult.places.length}):`
+        );
+        
+        const choiceNum = parseInt(choice);
+        if (choiceNum >= 1 && choiceNum <= winningResult.places.length) {
+          selectedPlace = winningResult.places[choiceNum - 1];
+        } 
+        // else {
+        //   alert('잘못된 선택입니다.');
+        //   return;
+        // }
       }
     }
 
@@ -808,7 +887,7 @@ const GroupVoting = ({ meetingId, currentUserId = 1, candidatePlaces }) => {
                         <div className="flex items-center gap-2 mb-1">
                           <h4 className="font-medium text-gray-900">{candidate.name}</h4>
                           <span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-gray-100 text-gray-800">
-                            {candidate.category}
+                            {categories.find(c => c.value === candidate.category)?.icon} {categories.find(c => c.value === candidate.category)?.label || '기타'}
                           </span>
                           {userVoted && (
                             <span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-primary-100 text-primary-800">
@@ -912,10 +991,7 @@ const GroupVoting = ({ meetingId, currentUserId = 1, candidatePlaces }) => {
                         <div className="flex items-center space-x-2">
                           <span className="text-sm font-medium text-gray-900">{message.userName}</span>
                           <span className="text-xs text-gray-500">
-                            {new Date(message.timestamp).toLocaleTimeString('ko-KR', {
-                              hour: '2-digit',
-                              minute: '2-digit'
-                            })}
+                            {formatVoteTime(message.timestamp || message.createdAt)}
                           </span>
                         </div>
                         <p className="text-sm text-gray-700 mt-1">{message.message}</p>

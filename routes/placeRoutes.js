@@ -4,6 +4,66 @@ const router = express.Router();
 
 // Kakao API 키 (환경변수에서 가져오기)
 const KAKAO_API_KEY = process.env.KAKAO_API_KEY || 'f562a71b13dcad881fee2b157d93121c';
+const GOOGLE_API_KEY = process.env.GOOGLE_PLACES_API_KEY || 'YOUR_GOOGLE_API_KEY';
+
+// Google Places API로 장소 상세 정보 및 리뷰 가져오기
+const getGooglePlaceDetails = async (placeName, address) => {
+  try {
+    // 1단계: Place Search로 place_id 찾기
+    const searchQuery = `${placeName} ${address}`;
+    const searchUrl = 'https://maps.googleapis.com/maps/api/place/textsearch/json';
+    
+    const searchResponse = await axios.get(searchUrl, {
+      params: {
+        query: searchQuery,
+        key: GOOGLE_API_KEY,
+        language: 'ko'
+      }
+    });
+
+    if (!searchResponse.data.results || searchResponse.data.results.length === 0) {
+      return null;
+    }
+
+    const place = searchResponse.data.results[0];
+    const placeId = place.place_id;
+
+    // 2단계: Place Details로 리뷰 가져오기
+    const detailsUrl = 'https://maps.googleapis.com/maps/api/place/details/json';
+    
+    const detailsResponse = await axios.get(detailsUrl, {
+      params: {
+        place_id: placeId,
+        fields: 'rating,reviews,user_ratings_total,photos',
+        key: GOOGLE_API_KEY,
+        language: 'ko'
+      }
+    });
+
+    const details = detailsResponse.data.result;
+    
+    // 리뷰 데이터 정리
+    const reviews = (details.reviews || []).map(review => ({
+      id: `google_${review.time}`,
+      userId: review.author_name,
+      rating: review.rating,
+      comment: review.text,
+      createdAt: new Date(review.time * 1000).toISOString(),
+      source: 'google'
+    }));
+
+    return {
+      rating: details.rating || 0,
+      reviews: reviews,
+      reviewCount: details.user_ratings_total || 0,
+      photos: details.photos || []
+    };
+
+  } catch (error) {
+    console.error('Google Places API 호출 실패:', error.response?.data || error.message);
+    return null;
+  }
+};
 
 // 테스트 엔드포인트
 router.get('/test', (req, res) => {
@@ -11,7 +71,8 @@ router.get('/test', (req, res) => {
   res.json({
     success: true,
     message: 'Places API 정상 작동',
-    kakaoApiKey: KAKAO_API_KEY ? '설정됨' : '설정안됨'
+    kakaoApiKey: KAKAO_API_KEY ? '설정됨' : '설정안됨',
+    googleApiKey: GOOGLE_API_KEY ? '설정됨' : '설정안됨'
   });
 });
 
@@ -62,28 +123,92 @@ router.get('/search', async (req, res) => {
       params: params
     });
 
-    // 응답 데이터 변환
-    const places = response.data.documents.map(place => ({
+    // 장소명에서 전화번호나 불필요한 정보 제거하는 함수
+    const cleanPlaceName = (name) => {
+      if (!name) return '';
+      let cleaned = name.trim();
+      
+      // 카테고리 정보 제거 (가장 먼저 처리)
+      cleaned = cleaned.replace(/^(카페|맛집|레스토랑|커피전문점|음식점|디저트|브런치|술집|바|펜션|호텔|모텔|노래방|볼링장|영화관|공원|마트|백화점|쇼핑몰)\s*:\s*/i, '');
+      
+      // 전화번호 패턴 제거
+      cleaned = cleaned.replace(/\b\d{2,4}-\d{3,4}-\d{4}\b/g, '');
+      cleaned = cleaned.replace(/\b\d{3}-\d{4}-\d{4}\b/g, '');
+      cleaned = cleaned.replace(/\b\d{4}-\d{4}\b/g, '');
+      
+      // 괄호 안의 전화번호나 기타 정보 제거
+      cleaned = cleaned.replace(/\([^)]*\d{3,4}[^)]*\)/g, '');
+      
+      // 카테고리 정보가 뒤에 있는 경우도 제거
+      cleaned = cleaned.replace(/\s+(카페|맛집|레스토랑|커피전문점|음식점|디저트|브런치|술집|바|펜션|호텔|모텔|노래방|볼링장|영화관|공원|마트|백화점|쇼핑몰)$/i, '');
+      cleaned = cleaned.replace(/\s*\((카페|맛집|레스토랑|커피전문점|음식점|디저트|브런치|술집|바|펜션|호텔|모텔|노래방|볼링장|영화관|공원|마트|백화점|쇼핑몰)\)$/i, '');
+      
+      // 연속된 공백 정리
+      cleaned = cleaned.replace(/\s+/g, ' ');
+      cleaned = cleaned.trim();
+      
+      return cleaned || name; // 정리 결과가 비어있으면 원본 반환
+    };
+
+    // 응답 데이터 변환 (Google Places API 리뷰 통합)
+    // 성능 최적화: 처음 5개 장소만 Google API 호출
+    const places = await Promise.all(
+      response.data.documents.slice(0, 5).map(async (place) => {
+        const cleanedName = cleanPlaceName(place.place_name);
+        
+        // Google Places API로 리뷰 데이터 가져오기 (비동기)
+        const googleData = await getGooglePlaceDetails(cleanedName, place.address_name);
+        
+        return {
+          id: place.id,
+          name: cleanedName,
+          category: place.category_name.split(' > ').pop(), // 마지막 카테고리만
+          address: place.address_name,
+          roadAddress: place.road_address_name,
+          coordinates: {
+            x: parseFloat(place.x), // 경도
+            y: parseFloat(place.y)  // 위도
+          },
+          phone: place.phone || null,
+          rating: googleData?.rating || 0, // Google API에서 가져온 실제 평점
+          reviews: googleData?.reviews || [], // Google API에서 가져온 실제 리뷰
+          reviewCount: googleData?.reviewCount || 0,
+          photos: googleData?.photos || [],
+          url: place.place_url,
+          distance: place.distance ? parseInt(place.distance) : null,
+          source: 'kakao_google_hybrid' // 하이브리드 방식 표시
+        };
+      })
+    );
+
+    // 나머지 장소들은 Google API 없이 기본 데이터만
+    const remainingPlaces = response.data.documents.slice(5).map(place => ({
       id: place.id,
-      name: place.place_name,
-      category: place.category_name.split(' > ').pop(), // 마지막 카테고리만
+      name: cleanPlaceName(place.place_name),
+      category: place.category_name.split(' > ').pop(),
       address: place.address_name,
       roadAddress: place.road_address_name,
       coordinates: {
-        x: parseFloat(place.x), // 경도
-        y: parseFloat(place.y)  // 위도
+        x: parseFloat(place.x),
+        y: parseFloat(place.y)
       },
       phone: place.phone || null,
-      rating: null, // Kakao API에서는 평점 정보 제공 안함
+      rating: 0,
+      reviews: [],
+      reviewCount: 0,
+      photos: [],
       url: place.place_url,
-      distance: place.distance ? parseInt(place.distance) : null
+      distance: place.distance ? parseInt(place.distance) : null,
+      source: 'kakao_only'
     }));
 
-    console.log(`검색 결과: ${places.length}개 장소 찾음`);
+    const allPlaces = [...places, ...remainingPlaces];
+
+    console.log(`검색 결과: ${allPlaces.length}개 장소 찾음 (상위 ${places.length}개 Google 리뷰 통합 완료)`);
 
     res.json({
       success: true,
-      places: places,
+      places: allPlaces,
       meta: {
         total_count: response.data.meta.total_count,
         pageable_count: response.data.meta.pageable_count,
@@ -147,9 +272,36 @@ router.get('/category/:categoryCode', async (req, res) => {
       }
     });
 
+    // 장소명 정리 함수 (동일한 로직)
+    const cleanPlaceName = (name) => {
+      if (!name) return '';
+      let cleaned = name.trim();
+      
+      // 카테고리 정보 제거 (가장 먼저 처리)
+      cleaned = cleaned.replace(/^(카페|맛집|레스토랑|커피전문점|음식점|디저트|브런치|술집|바|펜션|호텔|모텔|노래방|볼링장|영화관|공원|마트|백화점|쇼핑몰)\s*:\s*/i, '');
+      
+      // 전화번호 패턴 제거
+      cleaned = cleaned.replace(/\b\d{2,4}-\d{3,4}-\d{4}\b/g, '');
+      cleaned = cleaned.replace(/\b\d{3}-\d{4}-\d{4}\b/g, '');
+      cleaned = cleaned.replace(/\b\d{4}-\d{4}\b/g, '');
+      
+      // 괄호 안의 전화번호나 기타 정보 제거
+      cleaned = cleaned.replace(/\([^)]*\d{3,4}[^)]*\)/g, '');
+      
+      // 카테고리 정보가 뒤에 있는 경우도 제거
+      cleaned = cleaned.replace(/\s+(카페|맛집|레스토랑|커피전문점|음식점|디저트|브런치|술집|바|펜션|호텔|모텔|노래방|볼링장|영화관|공원|마트|백화점|쇼핑몰)$/i, '');
+      cleaned = cleaned.replace(/\s*\((카페|맛집|레스토랑|커피전문점|음식점|디저트|브런치|술집|바|펜션|호텔|모텔|노래방|볼링장|영화관|공원|마트|백화점|쇼핑몰)\)$/i, '');
+      
+      // 연속된 공백 정리
+      cleaned = cleaned.replace(/\s+/g, ' ');
+      cleaned = cleaned.trim();
+      
+      return cleaned || name;
+    };
+
     const places = response.data.documents.map(place => ({
       id: place.id,
-      name: place.place_name,
+      name: cleanPlaceName(place.place_name), // 장소명 정리
       category: place.category_name.split(' > ').pop(),
       address: place.address_name,
       roadAddress: place.road_address_name,

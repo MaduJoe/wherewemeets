@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import api from '../utils/api';
+import { cleanPlacesArray, cleanPlaceData } from '../utils/placeUtils';
 import { FireIcon, SparklesIcon, PlusCircleIcon, ExclamationTriangleIcon, ChevronRightIcon } from '@heroicons/react/24/outline';
 
 const PlaceCard = ({ place, onPlaceSelected, icon, badgeText, badgeColor }) => (
@@ -49,7 +50,7 @@ const PlaceCard = ({ place, onPlaceSelected, icon, badgeText, badgeColor }) => (
 
         const standardCategory = categoryMapping[place.category] || 'other';
 
-        onPlaceSelected({
+        const rawPlaceData = {
           id: place.id,
           name: place.name,
           category: standardCategory,
@@ -61,7 +62,11 @@ const PlaceCard = ({ place, onPlaceSelected, icon, badgeText, badgeColor }) => (
           rating: place.rating,
           phone: place.phone,
           photos: place.photos || []
-        });
+        };
+
+        // 장소 데이터 정리 적용
+        const cleanedPlaceData = cleanPlaceData(rawPlaceData);
+        onPlaceSelected(cleanedPlaceData);
       }}
       className="w-full bg-gradient-to-r from-blue-500 to-indigo-500 text-white py-2 px-3 rounded-md text-sm font-medium hover:from-blue-600 hover:to-indigo-600 transition duration-150 flex items-center justify-center"
     >
@@ -114,7 +119,8 @@ const RuleBasedPlaces = ({ onPlaceSelected }) => {
           size: 5
         }
       });
-      return response.data.places || [];
+      // 장소 데이터 정리
+      return cleanPlacesArray(response.data.places || []);
     } catch (error) {
       console.error('장소 검색 실패:', error);
       throw error;

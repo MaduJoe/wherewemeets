@@ -19,6 +19,7 @@ const placeRoutes = require('./routes/placeRoutes');
 const subscriptionRoutes = require('./routes/subscription');
 const aiAssistantRoutes = require('./routes/aiAssistant');
 const userHistoryRoutes = require('./routes/userHistory');
+const chatRoutes = require('./routes/chat');
 
 const app = express();
 const server = http.createServer(app);
@@ -187,6 +188,7 @@ app.use('/api/places', placeRoutes);
 app.use('/api/subscription', subscriptionRoutes);
 app.use('/api/aiAssistant', aiAssistantRoutes);
 app.use('/api/users', userHistoryRoutes);
+app.use('/api/chat', chatRoutes);
 
 // API 전용 서버 모드
 app.get('/', (req, res) => {
