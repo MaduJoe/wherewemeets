@@ -113,7 +113,7 @@ export const cleanAIResponse = (response) => {
   cleaned = cleaned.replace(/\(https?:\/\/place\.map\.kakao\.com\/\d+\)/g, '');
   
   // 일반 URL 패턴 제거
-  cleaned = cleaned.replace(/https?:\/\/[^\s\)]+/g, '');
+  cleaned = cleaned.replace(/https?:\/\/[^\s)]+/g, '');
   
   // 빈 괄호나 대괄호 제거
   cleaned = cleaned.replace(/\[\s*\]/g, '');
