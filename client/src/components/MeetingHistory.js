@@ -1,11 +1,9 @@
-import React, { useState, useEffect, useCallback } from 'react';
-import { useAuth } from '../contexts/AuthContext';
+import React, { useState, useEffect } from 'react';
 import api from '../utils/api';
-import { formatDate, formatRelativeTime } from '../utils/dateUtils';
+import { formatVoteTime } from '../utils/dateUtils';
 import './MeetingHistory.css';
 
 const MeetingHistory = () => {
-  const { user } = useAuth();
   const [history, setHistory] = useState([]);
   const [stats, setStats] = useState(null);
   const [loading, setLoading] = useState(false);
@@ -18,17 +16,13 @@ const MeetingHistory = () => {
 
   // 페이지 로드 시 데이터 가져오기
   useEffect(() => {
-    if (user?.id) {
-      fetchHistory();
-      fetchStats();
-    }
+    fetchHistory();
+    fetchStats();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [user, filter, pagination.currentPage]);
+  }, [filter, pagination.currentPage]);
 
   // 미팅 히스토리 조회
   const fetchHistory = async () => {
-    if (!user?.id) return;
-    
     setLoading(true);
     try {
       const params = {
@@ -37,7 +31,7 @@ const MeetingHistory = () => {
         ...filter
       };
       
-      const response = await api.get(`/users/${user.id}/history`, { params });
+      const response = await api.get('/users/history', { params });
       
       if (response.data.success) {
         setHistory(response.data.data.history);
@@ -52,10 +46,8 @@ const MeetingHistory = () => {
 
   // 사용자 통계 조회
   const fetchStats = async () => {
-    if (!user?.id) return;
-    
     try {
-      const response = await api.get(`/users/${user.id}/stats`);
+      const response = await api.get('/users/stats');
       
       if (response.data.success) {
         setStats(response.data.data);
@@ -68,7 +60,7 @@ const MeetingHistory = () => {
   // 미팅 상태 변경
   const updateMeetingStatus = async (meetingId, status, notes = '') => {
     try {
-      const response = await api.patch(`/users/${user.id}/history/${meetingId}/status`, {
+      const response = await api.patch('/users/history/' + meetingId + '/status', {
         status,
         notes
       });
@@ -89,7 +81,7 @@ const MeetingHistory = () => {
     if (!window.confirm('이 미팅 기록을 삭제하시겠습니까?')) return;
     
     try {
-      const response = await api.delete(`/users/${user.id}/history/${meetingId}`);
+      const response = await api.delete('/users/history/' + meetingId);
       
       if (response.data.success) {
         fetchHistory();
@@ -135,14 +127,6 @@ const MeetingHistory = () => {
       </span>
     );
   };
-
-  if (!user) {
-    return (
-      <div className="flex items-center justify-center h-64">
-        <p className="text-gray-500">로그인이 필요합니다.</p>
-      </div>
-    );
-  }
 
   return (
     <div className="meeting-history">
@@ -241,7 +225,7 @@ const MeetingHistory = () => {
               <div className="meeting-header">
                 <div className="meeting-info">
                   <h4 className="meeting-title">{meeting.title}</h4>
-                  <p className="meeting-date">{formatDate(meeting.createdAt)}</p>
+                  <p className="meeting-date">{formatVoteTime(meeting.createdAt)}</p>
                 </div>
                 <div className="meeting-status">
                   {getStatusBadge(meeting.meetingStatus)}

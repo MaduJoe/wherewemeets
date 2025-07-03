@@ -3,12 +3,10 @@ import api from '../utils/api';
 import { cleanPlacesArray, cleanPlaceData } from '../utils/placeUtils';
 import { 
   MagnifyingGlassIcon,
+  MapPinIcon,
   StarIcon,
-  FunnelIcon,
-  PhotoIcon,
-  ChatBubbleBottomCenterTextIcon
+  ClockIcon
 } from '@heroicons/react/24/outline';
-import { StarIcon as StarSolidIcon } from '@heroicons/react/24/solid';
 
 const PlaceExplorer = ({ onPlaceSelected }) => {
   const [places, setPlaces] = useState([]);
@@ -49,6 +47,7 @@ const PlaceExplorer = ({ onPlaceSelected }) => {
 
   useEffect(() => {
     searchPlaces();
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [filters]);
 
   const searchPlaces = async () => {
@@ -264,26 +263,27 @@ const PlaceExplorer = ({ onPlaceSelected }) => {
     ));
   };
 
-  const submitReview = async (placeId) => {
-    try {
-      const response = await api.post(`/places/${placeId}/reviews`, {
-        ...newReview,
-        userId: 1 // 임시 사용자 ID
-      });
-      
-      // 장소 정보 업데이트
-      setPlaces(places.map(place => 
-        place.id === placeId ? response.data : place
-      ));
-      
-      setSelectedPlace(response.data);
-      setNewReview({ rating: 5, comment: '' });
-      alert('리뷰가 등록되었습니다!');
-    } catch (error) {
-      console.error('리뷰 등록 실패:', error);
-      alert('리뷰 등록 중 오류가 발생했습니다.');
-    }
-  };
+  // 리뷰 기능은 현재 미사용
+  // const submitReview = async (placeId) => {
+  //   try {
+  //     const response = await api.post(`/places/${placeId}/reviews`, {
+  //       ...newReview,
+  //       userId: 1 // 임시 사용자 ID
+  //     });
+  //     
+  //     // 장소 정보 업데이트
+  //     setPlaces(places.map(place => 
+  //       place.id === placeId ? response.data : place
+  //     ));
+  //     
+  //     setSelectedPlace(response.data);
+  //     setNewReview({ rating: 5, comment: '' });
+  //     alert('리뷰가 등록되었습니다!');
+  //   } catch (error) {
+  //     console.error('리뷰 등록 실패:', error);
+  //     alert('리뷰 등록 중 오류가 발생했습니다.');
+  //   }
+  // };
 
   const PlaceDetailModal = ({ place, onClose }) => {
     // ESC 키 이벤트 리스너

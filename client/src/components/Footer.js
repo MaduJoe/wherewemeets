@@ -36,9 +36,16 @@ const Footer = () => {
             </h3>
             <ul className="space-y-3">
               <li>
-                <a href="#" className="text-gray-400 hover:text-white transition duration-200">
+                <button 
+                  type="button"
+                  className="text-gray-400 hover:text-white transition duration-200 bg-transparent border-none cursor-pointer p-0"
+                  onClick={() => {
+                    // FAQ 기능은 향후 구현 예정
+                    alert('FAQ 기능은 준비 중입니다.');
+                  }}
+                >
                   FAQ
-                </a>
+                </button>
               </li>
               <li>
                 <a href="mailto:support@wherewemeets.com" className="text-gray-400 hover:text-white transition duration-200">

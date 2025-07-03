@@ -4,13 +4,14 @@ import { useAuth } from '../contexts/AuthContext';
 import SmartInfoCollector from '../components/SmartInfoCollector';
 import PremiumFeatures from '../components/PremiumFeatures';
 import { 
-  SparklesIcon, 
-  UsersIcon, 
-  MapPinIcon, 
-  ArrowPathIcon,
-  PlayIcon,
-  ChartBarIcon,
+  RocketLaunchIcon,
+  SparklesIcon,
+  ClockIcon,
   HeartIcon,
+  ChatBubbleLeftRightIcon,
+  PlayIcon,
+  ArrowPathIcon,
+  ChartBarIcon,
   LightBulbIcon
 } from '@heroicons/react/24/outline';
 

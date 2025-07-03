@@ -2,7 +2,7 @@
 export const generateUUID = () => {
   return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function(c) {
     const r = Math.random() * 16 | 0;
-    const v = c === 'x' ? r : (r & 0x3 | 0x8);
+    const v = c === 'x' ? r : ((r & 0x3) | 0x8);
     return v.toString(16);
   });
 };
@@ -74,4 +74,22 @@ export const generateShareLink = (roomId) => {
 export const generateHostLink = (roomId, hostToken) => {
   const baseUrl = window.location.origin;
   return `${baseUrl}/meeting-planner/${roomId}?token=${hostToken}`;
+};
+
+export const parseJwt = (token) => {
+  try {
+    const base64Url = token.split('.')[1];
+    const base64 = base64Url.replace(/-/g, '+').replace(/_/g, '/');
+    const jsonPayload = decodeURIComponent(atob(base64).split('').map(function(c) {
+      return '%' + ('00' + c.charCodeAt(0).toString(16)).slice(-2);
+    }).join(''));
+    return JSON.parse(jsonPayload);
+  } catch (error) {
+    return null;
+  }
+};
+
+export const isTokenExpired = (token) => {
+  const payload = parseJwt(token);
+  return payload && (payload.exp * 1000) < Date.now();
 }; 

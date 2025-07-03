@@ -1,11 +1,20 @@
 import React, { createContext, useContext, useState, useEffect } from 'react';
-import toast from 'react-hot-toast';
+import { toast } from 'react-hot-toast';
+import { 
+  createOrRestoreGuestSession, 
+  clearGuestSession, 
+  getUserLevel, 
+  getUserPermissions, 
+  migrateGuestToMember,
+  initializeGuestSystem,
+  USER_LEVELS
+} from '../utils/sessionUtils';
 
 const AuthContext = createContext();
 
 export const useAuth = () => {
   const context = useContext(AuthContext);
-  if (context === undefined) {
+  if (!context) {
     throw new Error('useAuth must be used within an AuthProvider');
   }
   return context;
@@ -22,6 +31,9 @@ export const AuthProvider = ({ children }) => {
   const [user, setUser] = useState(null);
   const [isAuthenticated, setIsAuthenticated] = useState(false);
   const [loading, setLoading] = useState(true);
+  const [userLevel, setUserLevel] = useState(USER_LEVELS.GUEST);
+  const [userPermissions, setUserPermissions] = useState({});
+  const [guestSession, setGuestSession] = useState(null);
   const [userAnalytics, setUserAnalytics] = useState({
     visitCount: 0,
     featuresUsed: [],
@@ -29,59 +41,97 @@ export const AuthProvider = ({ children }) => {
   });
 
   useEffect(() => {
-    initializeAuth();
+    initializeSystem();
     updateAnalytics();
   }, []);
 
-  const initializeAuth = async () => {
+  // 사용자 레벨과 권한 업데이트
+  useEffect(() => {
+    const level = getUserLevel(user, isAuthenticated);
+    const permissions = getUserPermissions(level);
+    
+    setUserLevel(level);
+    setUserPermissions(permissions);
+    
+    console.log('사용자 레벨 업데이트:', level, permissions);
+  }, [user, isAuthenticated]);
+
+  const initializeSystem = async () => {
     try {
       setLoading(true);
+      
+      // 시스템 초기화 (만료된 게스트 데이터 정리)
+      initializeGuestSystem();
+      
       const token = localStorage.getItem('token');
       if (token) {
-        // 토큰 유효성 검증 및 사용자 정보 조회 (5초 타임아웃)
-        const controller = new AbortController();
-        const timeoutId = setTimeout(() => controller.abort(), 5000);
-
-        try {
-          const response = await fetch(`${API_BASE_URL}/auth/me`, {
-            headers: {
-              'Authorization': `Bearer ${token}`
-            },
-            signal: controller.signal
-          });
-
-          clearTimeout(timeoutId);
-
-          if (response.ok) {
-            const data = await response.json();
-            setUser(data.user);
-            setIsAuthenticated(true);
-          } else {
-            // 토큰이 유효하지 않으면 로컬 스토리지에서 제거하고 게스트 모드로 전환
-            localStorage.removeItem('token');
-            createGuestUser();
-          }
-        } catch (fetchError) {
-          clearTimeout(timeoutId);
-          if (fetchError.name === 'AbortError') {
-            console.warn('서버 연결 타임아웃 - 게스트 모드로 진행');
-          } else {
-            console.error('API 호출 에러:', fetchError);
-          }
-          // 네트워크 오류 시에도 토큰 제거하고 게스트 모드로 전환
-          localStorage.removeItem('token');
-          createGuestUser();
-        }
+        // 토큰이 있으면 사용자 정보 조회
+        await authenticateWithToken(token);
       } else {
-        // 토큰이 없으면 게스트 사용자 생성
-        createGuestUser();
+        // 토큰이 없으면 게스트 세션 생성
+        createGuestSession();
       }
     } catch (error) {
-      console.error('인증 초기화 에러:', error);
-      localStorage.removeItem('token');
-      createGuestUser();
+      console.error('시스템 초기화 에러:', error);
+      createGuestSession();
     } finally {
       setLoading(false);
+    }
+  };
+
+  const authenticateWithToken = async (token) => {
+    try {
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 5000);
+
+      const response = await fetch(`${API_BASE_URL}/auth/me`, {
+        headers: {
+          'Authorization': `Bearer ${token}`
+        },
+        signal: controller.signal
+      });
+
+      clearTimeout(timeoutId);
+
+      if (response.ok) {
+        const data = await response.json();
+        setUser(data.user);
+        setIsAuthenticated(true);
+        console.log('사용자 인증 성공:', data.user);
+      } else {
+        // 토큰이 유효하지 않으면 제거하고 게스트 모드
+        localStorage.removeItem('token');
+        createGuestSession();
+      }
+    } catch (error) {
+      console.error('토큰 인증 실패:', error);
+      localStorage.removeItem('token');
+      createGuestSession();
+    }
+  };
+
+  const createGuestSession = () => {
+    const session = createOrRestoreGuestSession();
+    setGuestSession(session);
+    
+    const guestUser = {
+      id: session.id,
+      name: session.isRestored ? '게스트 사용자 (복원됨)' : '게스트 사용자',
+      email: '',
+      subscription: 'guest', // 명확한 구분을 위해 'guest'로 설정
+      isGuest: true,
+      sessionExpiresAt: session.expiresAt,
+      createdAt: new Date(session.createdAt).toISOString()
+    };
+    
+    setUser(guestUser);
+    setIsAuthenticated(false);
+    
+    if (session.isRestored) {
+      console.log('게스트 세션 복원:', session.id);
+      toast.success('이전 세션이 복원되었습니다', { duration: 2000 });
+    } else {
+      console.log('새 게스트 세션 생성:', session.id);
     }
   };
 
@@ -107,6 +157,10 @@ export const AuthProvider = ({ children }) => {
   const register = async (userData) => {
     try {
       setLoading(true);
+      
+      // 현재 게스트 ID 저장 (데이터 마이그레이션용)
+      const currentGuestId = user?.isGuest ? user.id : null;
+      
       const response = await fetch(`${API_BASE_URL}/auth/register`, {
         method: 'POST',
         headers: {
@@ -121,6 +175,13 @@ export const AuthProvider = ({ children }) => {
         localStorage.setItem('token', data.token);
         setUser(data.user);
         setIsAuthenticated(true);
+        
+        // 게스트 데이터 마이그레이션
+        if (currentGuestId) {
+          migrateGuestToMember(currentGuestId, data.user.id);
+          toast.success('게스트 데이터가 회원 계정으로 이전되었습니다!');
+        }
+        
         toast.success(data.message || '회원가입이 완료되었습니다!');
         return { success: true, user: data.user };
       } else {
@@ -139,6 +200,10 @@ export const AuthProvider = ({ children }) => {
   const login = async (credentials) => {
     try {
       setLoading(true);
+      
+      // 현재 게스트 ID 저장 (데이터 마이그레이션용)
+      const currentGuestId = user?.isGuest ? user.id : null;
+      
       const response = await fetch(`${API_BASE_URL}/auth/login`, {
         method: 'POST',
         headers: {
@@ -154,8 +219,11 @@ export const AuthProvider = ({ children }) => {
         setUser(data.user);
         setIsAuthenticated(true);
         
-        // 로그인 이력은 백엔드에서 처리하므로 클라이언트에서는 제거
-        // await trackFeatureUsage('login');
+        // 게스트 데이터 마이그레이션
+        if (currentGuestId) {
+          migrateGuestToMember(currentGuestId, data.user.id);
+          toast.success('게스트 데이터가 계정으로 이전되었습니다!');
+        }
         
         toast.success(data.message || '로그인 성공!');
         return { success: true, user: data.user };
@@ -175,6 +243,10 @@ export const AuthProvider = ({ children }) => {
   const socialLogin = async (provider, socialData) => {
     try {
       setLoading(true);
+      
+      // 현재 게스트 ID 저장 (데이터 마이그레이션용)
+      const currentGuestId = user?.isGuest ? user.id : null;
+      
       const response = await fetch(`${API_BASE_URL}/auth/social-login`, {
         method: 'POST',
         headers: {
@@ -192,6 +264,11 @@ export const AuthProvider = ({ children }) => {
         localStorage.setItem('token', data.token);
         setUser(data.user);
         setIsAuthenticated(true);
+        
+        // 게스트 데이터 마이그레이션
+        if (currentGuestId) {
+          migrateGuestToMember(currentGuestId, data.user.id);
+        }
         
         await trackFeatureUsage(`social_login_${provider}`);
         
@@ -212,8 +289,49 @@ export const AuthProvider = ({ children }) => {
 
   const logout = () => {
     localStorage.removeItem('token');
-    createGuestUser(); // 로그아웃 시 게스트 모드로 전환
+    setIsAuthenticated(false);
+    
+    // 게스트 세션 생성
+    createGuestSession();
+    
     toast.success('로그아웃되었습니다. 게스트 모드로 전환됩니다.');
+  };
+
+  // 게스트 세션 수동 초기화
+  const resetGuestSession = () => {
+    clearGuestSession();
+    createGuestSession();
+    toast.success('게스트 세션이 초기화되었습니다.');
+  };
+
+  // 게스트 세션 연장
+  const extendGuestSession = () => {
+    if (user?.isGuest) {
+      const newSession = createOrRestoreGuestSession();
+      setGuestSession(newSession);
+      
+      const updatedUser = {
+        ...user,
+        sessionExpiresAt: newSession.expiresAt
+      };
+      setUser(updatedUser);
+      
+      toast.success('게스트 세션이 연장되었습니다.');
+    }
+  };
+
+  // 세션 만료 확인
+  const checkSessionExpiry = () => {
+    if (user?.isGuest && guestSession) {
+      const timeUntilExpiry = guestSession.expiresAt - Date.now();
+      if (timeUntilExpiry <= 0) {
+        toast.error('게스트 세션이 만료되었습니다. 새로운 세션을 생성합니다.');
+        resetGuestSession();
+        return false;
+      }
+      return true;
+    }
+    return true;
   };
 
   const updateProfile = async (profileData) => {
@@ -370,35 +488,13 @@ export const AuthProvider = ({ children }) => {
     }
   };
 
-  // 게스트 사용자 생성 (기존 호환성 유지)
-  const createGuestUser = () => {
-    // 기존 게스트 정보가 있는지 확인
-    const existingGuestId = localStorage.getItem('guestUserId');
-    const guestId = existingGuestId || 'guest-' + Date.now();
-    
-    if (!existingGuestId) {
-      localStorage.setItem('guestUserId', guestId);
-    }
-    
-    const guestUser = {
-      id: guestId,
-      name: '게스트 사용자',
-      email: '',
-      subscription: 'free',
-      isGuest: true,
-      createdAt: new Date().toISOString()
-    };
-    
-    setUser(guestUser);
-    setIsAuthenticated(false); // 게스트는 인증되지 않은 상태
-    console.log('게스트 사용자 생성됨:', guestUser);
-    return guestUser;
-  };
-
   const value = {
     user,
     isAuthenticated,
     loading,
+    userLevel,
+    userPermissions,
+    guestSession,
     userAnalytics,
     register,
     login,
@@ -409,7 +505,9 @@ export const AuthProvider = ({ children }) => {
     getDashboardData,
     trackFeatureUsage,
     deleteAccount,
-    createGuestUser
+    resetGuestSession,
+    extendGuestSession,
+    checkSessionExpiry
   };
 
   return (

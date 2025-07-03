@@ -4,8 +4,7 @@ import io from 'socket.io-client';
 import { 
   UserIcon,
   TrophyIcon,
-  ScaleIcon,
-  ChartBarIcon
+  ScaleIcon
 } from '@heroicons/react/24/outline';
 import Dice3D from './Dice3D';
 
@@ -40,7 +39,8 @@ const WheelComponent = ({ segments, onFinished, isSpinning, winningSegment, sock
     if (isSpinning && !isAnimating) {
       spin();
     }
-  }, [isSpinning]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isSpinning, isAnimating]);
 
   // Socket.io로 다른 클라이언트의 룰렛 시작을 감지
   useEffect(() => {
@@ -60,6 +60,7 @@ const WheelComponent = ({ segments, onFinished, isSpinning, winningSegment, sock
         socket.off('roulette-started');
       };
     }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [socket, segments, isAnimating]);
 
   const spin = () => {
@@ -293,14 +294,14 @@ const RandomSelector = ({ meetingId, onLocationSelected }) => {
   const [loading, setLoading] = useState(true);
   const [selectionHistory, setSelectionHistory] = useState([]);
   const [fairnessMode, setFairnessMode] = useState('random');
-  const [showFairnessStats, setShowFairnessStats] = useState(false);
+  // const [showFairnessStats, setShowFairnessStats] = useState(false);
   const [winningSegment, setWinningSegment] = useState(null);
   const [socket, setSocket] = useState(null);
   const [isDataLoading, setIsDataLoading] = useState(false);
   const [isRouletteOwner, setIsRouletteOwner] = useState(false);
   const [resultAnimating, setResultAnimating] = useState(false);
-  const [socketConnected, setSocketConnected] = useState(false);
-  const [lastUpdated, setLastUpdated] = useState(null);
+  // const [socketConnected, setSocketConnected] = useState(false);
+  // const [lastUpdated, setLastUpdated] = useState(null);
   
   // 주사위 관련 상태
   const [diceRolling, setDiceRolling] = useState(false);
@@ -311,7 +312,7 @@ const RandomSelector = ({ meetingId, onLocationSelected }) => {
   const [quizMode, setQuizMode] = useState(false);
   const [currentQuiz, setCurrentQuiz] = useState(null);
   const [quizAnswer, setQuizAnswer] = useState('');
-  const [quizParticipants, setQuizParticipants] = useState([]);
+  // const [quizParticipants, setQuizParticipants] = useState([]);
   
   // 타이밍 게임 상태
   const [timingGameMode, setTimingGameMode] = useState(false);
@@ -361,12 +362,12 @@ const RandomSelector = ({ meetingId, onLocationSelected }) => {
       // 연결 상태 이벤트
       newSocket.on('connect', () => {
         console.log('Socket.io 연결됨');
-        setSocketConnected(true);
+        // setSocketConnected(true);
       });
 
       newSocket.on('disconnect', () => {
         console.log('Socket.io 연결 해제됨');
-        setSocketConnected(false);
+        // setSocketConnected(false);
       });
 
       // 미팅 룸에 참가
@@ -430,7 +431,8 @@ const RandomSelector = ({ meetingId, onLocationSelected }) => {
         newSocket.close();
       };
     }
-  }, [meetingId, isDataLoading]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [meetingId]);
 
   // 실시간 데이터 업데이트를 위한 폴링 (Socket.io 백업용)
   useEffect(() => {
@@ -443,13 +445,15 @@ const RandomSelector = ({ meetingId, onLocationSelected }) => {
     }, 5000); // 5초마다 백업 업데이트 (더 빠른 동기화)
 
     return () => clearInterval(interval);
-  }, [meetingId, isDataLoading]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [meetingId]);
 
   // 실제 후보 장소 데이터 로드
   useEffect(() => {
     if (meetingId) {
       loadCandidatePlacesData(false, true); // 초기 로딩시 로딩 스피너 표시
     }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [meetingId]);
 
   const loadCandidatePlacesData = async (force = false, showLoading = false) => {
@@ -567,7 +571,7 @@ const RandomSelector = ({ meetingId, onLocationSelected }) => {
       setLoading(false);
       }
       setIsDataLoading(false);
-      setLastUpdated(new Date());
+      // setLastUpdated(new Date());
     }
   };
 
@@ -590,10 +594,10 @@ const RandomSelector = ({ meetingId, onLocationSelected }) => {
   };
 
   // 수동 새로고침 함수 (로딩 스피너 표시)
-  const handleManualRefresh = () => {
-    console.log('수동 새로고침 실행');
-    loadCandidatePlacesData(true, true);
-  };
+  // const handleManualRefresh = () => {
+  //   console.log('수동 새로고침 실행');
+  //   loadCandidatePlacesData(true, true);
+  // };
 
   // 장소 카테고리 기반 아바타 생성
   const getPlaceAvatar = (category, index) => {
@@ -679,12 +683,12 @@ const RandomSelector = ({ meetingId, onLocationSelected }) => {
   };
 
   // 균형 선정 (적게 선정된 사람 우선)
-  const getBalancedSelection = () => {
-    const minCount = Math.min(...candidatePlaces.map(p => p.selectedCount));
-    const leastSelected = candidatePlaces.filter(p => p.selectedCount === minCount);
-    const randomIndex = Math.floor(Math.random() * leastSelected.length);
-    return leastSelected[randomIndex];
-  };
+  // const getBalancedSelection = () => {
+  //   const minCount = Math.min(...candidatePlaces.map(p => p.selectedCount));
+  //   const leastSelected = candidatePlaces.filter(p => p.selectedCount === minCount);
+  //   const randomIndex = Math.floor(Math.random() * leastSelected.length);
+  //   return leastSelected[randomIndex];
+  // };
 
   // 3D 주사위 굴리기 함수
   const rollDice = () => {

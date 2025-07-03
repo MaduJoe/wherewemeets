@@ -235,8 +235,20 @@ const RegisterPage = () => {
                 className="h-4 w-4 text-primary-600 focus:ring-primary-500 border-gray-300 rounded"
               />
               <label htmlFor="agree-terms" className="ml-2 block text-sm text-gray-900">
-                <a href="#" className="text-primary-600 hover:text-primary-500">이용약관</a> 및{' '}
-                <a href="#" className="text-primary-600 hover:text-primary-500">개인정보보호정책</a>에 동의합니다
+                <button
+                  type="button"
+                  className="text-primary-600 hover:text-primary-500 bg-transparent border-none cursor-pointer p-0 underline"
+                  onClick={() => alert('이용약관은 준비 중입니다.')}
+                >
+                  이용약관
+                </button> 및{' '}
+                <button
+                  type="button"
+                  className="text-primary-600 hover:text-primary-500 bg-transparent border-none cursor-pointer p-0 underline"
+                  onClick={() => alert('개인정보보호정책은 준비 중입니다.')}
+                >
+                  개인정보보호정책
+                </button>에 동의합니다
               </label>
             </div>
 

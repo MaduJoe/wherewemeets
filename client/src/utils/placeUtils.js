@@ -34,7 +34,7 @@ export const cleanPlaceName = (name) => {
   
   // 연속된 공백, 특수문자 정리
   cleaned = cleaned.replace(/\s+/g, ' ');
-  cleaned = cleaned.replace(/[^\w\s가-힣.,\-]/g, '');
+  cleaned = cleaned.replace(/[^\w\s가-힣.,-]/g, '');
   
   // 앞뒤 공백 및 특수문자 제거
   cleaned = cleaned.trim();

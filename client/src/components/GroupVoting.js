@@ -1,25 +1,17 @@
-import React, { useState, useEffect, useMemo, useCallback } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import api from '../utils/api';
-import { formatVoteTime, formatRelativeTime } from '../utils/dateUtils';
+import { formatVoteTime } from '../utils/dateUtils';
 import { 
   HandThumbUpIcon,
   ChatBubbleLeftRightIcon,
   CheckIcon,
-  UserGroupIcon,
-  FaceSmileIcon,
-  HeartIcon,
   UserPlusIcon,
   XMarkIcon,
   ShareIcon,
-  LinkIcon,
   TrashIcon,
   StarIcon,
-  PencilIcon,
-  ExclamationTriangleIcon,
-  TrophyIcon,
-  ClockIcon
+  TrophyIcon
 } from '@heroicons/react/24/outline';
-import { HandThumbUpIcon as HandThumbUpSolidIcon, HeartIcon as HeartSolidIcon } from '@heroicons/react/24/solid';
 import { useAuth } from '../contexts/AuthContext';
 import { isHost } from '../utils/tokenUtils';
 

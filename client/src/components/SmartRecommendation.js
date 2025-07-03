@@ -1,13 +1,14 @@
 import React, { useState, useRef, useEffect } from 'react';
 import axios from 'axios';
 import { useAuth } from '../contexts/AuthContext';
+import api, { searchPlacesBySentiment, extractSentimentKeywords } from '../utils/api'; // api와 감성 키워드 함수 임포트
 import { 
-  MapPinIcon, 
   ClockIcon, 
   StarIcon,
   SparklesIcon,
   ChatBubbleLeftEllipsisIcon,
-  UserIcon
+  PlusIcon,
+  CheckIcon
 } from '@heroicons/react/24/outline';
 
 const SmartRecommendation = ({ meetingId, onPlaceSelected }) => {
@@ -17,8 +18,12 @@ const SmartRecommendation = ({ meetingId, onPlaceSelected }) => {
   const [chatHistory, setChatHistory] = useState([]);
   const [userInput, setUserInput] = useState('');
   const [isTyping, setIsTyping] = useState(false);
-  const [conversationMode, setConversationMode] = useState(false);
+  // const [conversationMode, setConversationMode] = useState(false);
   const [usageLimit, setUsageLimit] = useState(null); // AI 추천 사용 제한 상태
+  const [showAddToVotingPrompt, setShowAddToVotingPrompt] = useState(false); // 그룹투표 추가 프롬프트 표시 상태
+  const [addingToVoting, setAddingToVoting] = useState({}); // 각 장소별 추가 중 상태
+  const [sentimentAnalysis, setSentimentAnalysis] = useState(null); // 감성 분석 결과
+  const [isUsingSentimentSearch, setIsUsingSentimentSearch] = useState(false); // 감성 키워드 검색 사용 여부
   const chatEndRef = useRef(null);
   
   const [filters, setFilters] = useState({
@@ -117,7 +122,8 @@ const SmartRecommendation = ({ meetingId, onPlaceSelected }) => {
           timestamp: new Date()
         }
     ]);
-  }, [user, usageLimit?.exceeded]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [user]);
 
   // 채팅 자동 스크롤
   useEffect(() => {
@@ -127,6 +133,196 @@ const SmartRecommendation = ({ meetingId, onPlaceSelected }) => {
       chatEndRef.current?.scrollIntoView({ behavior: 'smooth' });
     }
   }, [chatHistory, isTyping]);
+
+  // 감성 키워드 기반 장소 검색 함수
+  const getSentimentBasedRecommendations = async (userMessage) => {
+    setLoading(true);
+    setIsUsingSentimentSearch(true);
+    
+    try {
+      console.log('🎭 감성 키워드 기반 검색 시작:', userMessage);
+      
+      // 감성 키워드 검색 API 호출
+      const response = await searchPlacesBySentiment({
+        query: userMessage,
+        size: 8 // 8개 결과 요청
+      });
+
+      if (response.success && response.places) {
+        // 감성 분석 결과 저장
+        setSentimentAnalysis(response.sentiment_analysis);
+        
+        // 장소 데이터 변환 및 AI 추천 이유 추가
+        const placesWithReasons = response.places.map((place, index) => ({
+          id: place.id,
+          name: place.name,  
+          category: place.category,
+          address: place.address,
+          coordinates: place.coordinates,
+          rating: place.rating || 4.0,
+          phone: place.phone,
+          url: place.url,
+          distance: place.distance,
+          estimatedTravelTime: Math.round((place.distance || 1000) / 50) + 15, // 거리 기반 추정
+          reason: place.sentiment_analysis?.recommendation_reason || 
+                  `${index + 1}순위 추천 장소입니다. 감성 점수: ${place.sentiment_analysis?.score || 0}점`,
+          sentiment_score: place.sentiment_analysis?.score || 0,
+          matched_keywords: place.sentiment_analysis?.matched_keywords || [],
+          confidence: place.sentiment_analysis?.confidence || 0
+        }));
+
+        setRecommendations(placesWithReasons);
+        
+        // 감성 분석 결과를 채팅에 추가
+        const analysisMessage = generateSentimentAnalysisMessage(response.sentiment_analysis, placesWithReasons.length);
+        
+        setChatHistory(prev => [...prev, {
+          id: Date.now() + '_sentiment_analysis',
+          type: 'ai',
+          message: analysisMessage,
+          timestamp: new Date(),
+          sentiment_analysis: response.sentiment_analysis
+        }]);
+
+        if (meetingId && placesWithReasons.length > 0) {
+          setShowAddToVotingPrompt(true);
+        }
+
+        console.log('✅ 감성 키워드 기반 검색 완료:', placesWithReasons.length, '개 장소');
+      } else {
+        throw new Error('감성 키워드 기반 검색 결과가 없습니다.');
+      }
+    } catch (error) {
+      console.error('❌ 감성 키워드 기반 검색 실패:', error);
+      
+      // 실패 시 기본 검색으로 폴백
+      setChatHistory(prev => [...prev, {
+        id: Date.now() + '_sentiment_error',
+        type: 'ai',
+        message: '감성 키워드 분석에 실패했습니다. 기본 검색을 시도하겠습니다... 🔄',
+        timestamp: new Date()
+      }]);
+      
+      // 기본 검색으로 폴백
+      await getRecommendations();
+    } finally {
+      setLoading(false);
+      setIsUsingSentimentSearch(false);
+    }
+  };
+
+  // 감성 분석 결과 메시지 생성
+  const generateSentimentAnalysisMessage = (analysis, placesCount) => {
+    if (!analysis) return '감성 분석을 완료했습니다.';
+    
+    let message = '🎭 **감성 키워드 분석 결과**\n\n';
+    
+    // 추출된 키워드 표시
+    const keywordCategories = ['atmosphere', 'food', 'service', 'price', 'location'];
+    const foundKeywords = [];
+    
+    keywordCategories.forEach(category => {
+      if (analysis.extracted_keywords[category] && analysis.extracted_keywords[category].length > 0) {
+        const categoryName = {
+          atmosphere: '분위기',
+          food: '음식',
+          service: '서비스',
+          price: '가격',
+          location: '위치/접근성'
+        }[category];
+        
+        const keywords = analysis.extracted_keywords[category].map(k => k.keyword).join(', ');
+        foundKeywords.push(`**${categoryName}**: ${keywords}`);
+      }
+    });
+
+    if (foundKeywords.length > 0) {
+      message += '🔍 **추출된 감성 키워드:**\n' + foundKeywords.join('\n') + '\n\n';
+    }
+
+    // 전체 감성 점수
+    if (analysis.extracted_keywords.sentiment_score !== undefined) {
+      const sentiment = analysis.extracted_keywords.overall_sentiment;
+      const sentimentEmoji = sentiment === 'positive' ? '😊' : sentiment === 'negative' ? '😔' : '😐';
+      message += `${sentimentEmoji} **전체 감성**: ${sentiment} (점수: ${analysis.extracted_keywords.sentiment_score})\n\n`;
+    }
+
+    // 검색 결과 요약
+    message += `📊 **검색 결과**: ${placesCount}개 장소 추천\n`;
+    
+    if (analysis.analysis_summary) {
+      const { high_score_places, medium_score_places, low_score_places } = analysis.analysis_summary;
+      message += `- 🌟 고점수 (70점 이상): ${high_score_places}개\n`;
+      message += `- ⭐ 중간점수 (40-69점): ${medium_score_places}개\n`;
+      message += `- 💫 기본점수 (40점 미만): ${low_score_places}개\n\n`;
+    }
+
+    message += '아래 추천 장소들을 확인해보세요! 각 장소별로 감성 키워드 매칭 이유를 함께 표시했습니다. 🎯';
+
+    return message;
+  };
+
+  // 사용자 입력에 감성 키워드가 있는지 확인하는 함수  
+  const containsEmotionalKeywords = (text) => {
+    const emotionalKeywords = [
+      // 분위기 관련
+      '분위기', '좋은', '아늑한', '편안한', '멋진', '로맨틱', '따뜻한', '차분한', '고급스러운', '세련된',
+      // 감정 표현
+      '맛있는', '신선한', '유명한', '인기있는', '친절한', '빠른', '가성비', '저렴한', '합리적',
+      // 부정적 키워드도 포함
+      '시끄러운', '불편한', '비싼'
+    ];
+    
+    return emotionalKeywords.some(keyword => text.includes(keyword));
+  };
+
+  // 그룹투표에 장소 추가 함수
+  const addToGroupVoting = async (place) => {
+    if (!meetingId) {
+      alert('미팅 ID가 없습니다.');
+      return;
+    }
+
+    setAddingToVoting(prev => ({ ...prev, [place.id]: true }));
+
+    try {
+      // 장소 데이터를 그룹투표 형식에 맞게 변환
+      const candidatePlace = {
+        id: place.id,
+        name: place.name,
+        address: place.address,
+        category: place.category,
+        rating: place.rating || 0,
+        phone: place.phone || '',
+        url: place.url || '',
+        reason: place.reason || 'AI 추천 장소'
+      };
+
+      const response = await api.post(`/votes/${meetingId}/candidates`, {
+        place: candidatePlace
+      });
+
+      if (response.data.success) {
+        alert(`"${place.name}"이(가) 그룹투표에 추가되었습니다! 🎉`);
+        
+        // 성공적으로 추가된 장소는 목록에서 제거하거나 표시 변경
+        setRecommendations(prev => 
+          prev.map(rec => 
+            rec.id === place.id 
+              ? { ...rec, addedToVoting: true }
+              : rec
+          )
+        );
+      } else {
+        throw new Error(response.data.message || '장소 추가에 실패했습니다.');
+      }
+    } catch (error) {
+      console.error('그룹투표 장소 추가 실패:', error);
+      alert(error.response?.data?.message || `"${place.name}" 추가에 실패했습니다. 다시 시도해주세요.`);
+    } finally {
+      setAddingToVoting(prev => ({ ...prev, [place.id]: false }));
+    }
+  };
 
   const getRecommendations = async () => {
     setLoading(true);
@@ -230,154 +426,43 @@ const SmartRecommendation = ({ meetingId, onPlaceSelected }) => {
           return 'restaurant';
         };
         
-        // AI 응답을 일관된 형식으로 변환
-        let formattedRecommendations = [];
+        // 추천 장소 데이터 가공
+        const processedRecommendations = aiRecommendations.map((rec, index) => ({
+          id: `ai-rec-${Date.now()}-${index}`, // 고유 ID 생성
+          name: rec.name,
+          address: rec.address || '주소 정보 없음',
+          category: categorizePlace(rec.name),
+          rating: rec.rating || (3.5 + Math.random() * 1.5), // 3.5~5.0 사이 랜덤 평점
+          phone: rec.phone || '',
+          url: rec.url || '',
+          reason: rec.reason || 'AI가 추천하는 장소입니다.',
+          estimatedTravelTime: rec.estimatedTravelTime || (10 + Math.floor(Math.random() * 30)), // 10~40분 랜덤
+          addedToVoting: false // 그룹투표 추가 여부
+        }));
         
-        if (aiRecommendations.places) {
-          formattedRecommendations = aiRecommendations.places.map((place, index) => ({
-            id: `ai-${index}`,
-            name: place.name || '장소명 없음',
-            category: place.category || categorizePlace(place.name), // 서버에서 카테고리가 없으면 자동 분류
-            address: place.address || '주소 정보 없음',
-            reason: place.reason || '추천 이유 없음',
-            features: place.features || [],
-            priceRange: place.priceRange || '정보 없음',
-            rating: 4.0 + Math.random() * 1, // 임시 평점
-            estimatedTravelTime: Math.floor(Math.random() * 30) + 10 // 임시 이동시간
-          }));
-        } else if (aiRecommendations.rawText) {
-          // JSON 파싱 실패한 경우 텍스트 응답 처리
-          formattedRecommendations = [{
-            id: 'ai-text',
-            name: 'AI 추천 결과',
-            category: '정보',
-            address: '',
-            reason: aiRecommendations.rawText,
-            features: [],
-            priceRange: '',
-            rating: 4.0,
-            estimatedTravelTime: 20
-          }];
-        }
-        
-        setRecommendations(formattedRecommendations);
-        
-        // 성공 메시지를 채팅에 추가
-        let successMessage = `🎉 ${formattedRecommendations.length}개의 맞춤 장소를 찾았어요! 아래에서 확인해보세요.`;
-        
-        // 노트가 있으면 추가 정보 표시
-        if (response.data.data.note) {
-          successMessage += `\n\n💡 ${response.data.data.note}`;
-        }
-        
-        // 게스트 사용자 일일 사용량 증가
+        setRecommendations(processedRecommendations);
+        setShowAddToVotingPrompt(true); // 그룹투표 추가 프롬프트 표시
+
+        // 게스트 사용자 사용량 증가
         if (!isAuthenticated) {
-          const today = new Date().toDateString();
-          const lastUsageDate = localStorage.getItem('guestAIUsageDate');
-          let currentUsage = 0;
+          const currentUsage = parseInt(localStorage.getItem('guestAIUsage') || '0');
+          localStorage.setItem('guestAIUsage', (currentUsage + 1).toString());
           
-          // 날짜가 바뀌었으면 사용량 리셋
-          if (lastUsageDate !== today) {
-            localStorage.setItem('guestAIUsageDate', today);
-            localStorage.setItem('guestAIUsage', '0');
-            currentUsage = 0;
-          } else {
-            currentUsage = parseInt(localStorage.getItem('guestAIUsage') || '0');
-          }
-          
-          const newUsage = currentUsage + 1;
-          localStorage.setItem('guestAIUsage', newUsage.toString());
-          
-          setUsageLimit({
-            exceeded: newUsage >= 3,
-            used: newUsage,
-            limit: 3,
-            remaining: Math.max(0, 3 - newUsage),
-            isGuest: true,
-            resetTime: '매일 자정'
-          });
-          
-          if (newUsage >= 3) {
-            successMessage += `\n\n⚠️ 오늘의 AI 추천 사용량이 모두 소진되었습니다. 내일 자정에 다시 이용하거나 회원가입하여 더 많은 혜택을 받아보세요!`;
-          }
+          // 사용량 상태 업데이트
+          setUsageLimit(prev => ({
+            ...prev,
+            used: currentUsage + 1,
+            remaining: Math.max(0, prev.limit - (currentUsage + 1)),
+            exceeded: (currentUsage + 1) >= prev.limit
+          }));
         }
-        
-        // 사용량 정보가 있으면 클라이언트 상태 업데이트 (로그인 사용자)
-        if (response.data.data.usageInfo && isAuthenticated) {
-          const usageInfo = response.data.data.usageInfo;
-          if (usageInfo.remaining <= 0) {
-            setUsageLimit({
-              exceeded: true,
-              used: usageInfo.used,
-              limit: 3,
-              remaining: 0
-            });
-            successMessage += `\n\n⚠️ 무료 AI 추천 사용량이 모두 소진되었습니다. 더 많은 추천을 원하시면 프리미엄으로 업그레이드하세요!`;
-          } else {
-            setUsageLimit(prev => ({
-              ...prev,
-              used: usageInfo.used,
-              remaining: usageInfo.remaining
-            }));
-          }
-        }
-        
-        setChatHistory(prev => [...prev, {
-          id: `success-${Date.now()}`,
-          type: 'ai',
-          message: successMessage,
-          timestamp: new Date()
-        }]);
       } else {
-        throw new Error('AI 추천 데이터를 받지 못했습니다.');
+        throw new Error('추천 결과가 없습니다.');
       }
+      
     } catch (error) {
-      console.error('추천 장소 조회 실패:', error);
-      
-      // 더 자세한 에러 메시지 제공
-      let errorMessage = '추천 장소를 가져오는 중 오류가 발생했습니다.';
-      let isUsageLimitError = false;
-      
-      if (error.response?.status === 403) {
-        const errorData = error.response.data;
-        if (errorData.data?.usageLimit) {
-          isUsageLimitError = true;
-          errorMessage = errorData.message;
-          // 사용 제한 상태 업데이트
-          setUsageLimit({
-            exceeded: true,
-            used: errorData.data.used,
-            limit: errorData.data.limit,
-            remaining: errorData.data.remaining
-          });
-        } else {
-          errorMessage = 'AI 추천 기능은 프리미엄 회원만 이용 가능합니다.';
-        }
-      } else if (error.response?.status === 401) {
-        errorMessage = '로그인이 필요합니다.';
-      } else if (error.response?.data?.message) {
-        errorMessage = error.response.data.message;
-      }
-      
-      // 에러 메시지를 채팅에 추가
-      let chatMessage = `❌ ${errorMessage}`;
-      
-      if (isUsageLimitError) {
-        chatMessage += '\n\n💎 프리미엄으로 업그레이드하시면:\n• 무제한 AI 장소 추천\n• 더 자세한 분석과 필터링\n• 실시간 채팅 지원';
-      } else {
-        chatMessage += '\n\n잠시 후 다시 시도해보시거나, 관리자에게 문의해주세요.';
-      }
-      
-      setChatHistory(prev => [...prev, {
-        id: `error-${Date.now()}`,
-        type: 'ai',
-        message: chatMessage,
-        timestamp: new Date()
-      }]);
-      
-      if (!isUsageLimitError) {
-        alert(errorMessage);
-      }
+      console.error('AI 장소 추천 실패:', error);
+      alert(error.message || 'AI 장소 추천에 실패했습니다. 다시 시도해 주세요.');
     } finally {
       setLoading(false);
     }
@@ -441,11 +526,22 @@ const SmartRecommendation = ({ meetingId, onPlaceSelected }) => {
   const handleChatSubmit = async () => {
     if (!userInput.trim()) return;
 
+    // 사용량 제한 체크
+    if (usageLimit?.exceeded) {
+      alert(usageLimit.isGuest 
+        ? '오늘의 AI 장소 추천 사용량이 모두 소진되었습니다. 내일 다시 이용해주세요!'
+        : '무료 사용자는 AI 장소 추천을 5회만 이용할 수 있습니다. 프리미엄으로 업그레이드하세요!'
+      );
+      return;
+    }
+
+    const userMessageText = userInput.trim();
+
     // 사용자 메시지 추가
     const userMessage = {
       id: `user-${Date.now()}`,
       type: 'user',
-      message: userInput,
+      message: userMessageText,
       timestamp: new Date()
     };
 
@@ -453,36 +549,80 @@ const SmartRecommendation = ({ meetingId, onPlaceSelected }) => {
     setUserInput('');
     setIsTyping(true);
 
-    // AI 응답 생성
-    const aiResponses = generateAIResponse(userInput);
-
-    // 순차적으로 AI 응답 추가
-    for (let i = 0; i < aiResponses.length; i++) {
-      await new Promise(resolve => setTimeout(resolve, 1000));
+    try {
+      // 감성 키워드 감지
+      const hasEmotionalKeywords = containsEmotionalKeywords(userMessageText);
       
-      const aiMessage = {
-        id: `ai-response-${Date.now()}-${i}`,
+      if (hasEmotionalKeywords) {
+        console.log('🎭 감성 키워드 감지됨, 감성 기반 검색 사용');
+        
+        // 감성 분석 시작 메시지
+        const sentimentStartMessage = {
+          id: `ai-sentiment-start-${Date.now()}`,
+          type: 'ai',
+          message: '🎭 감성 키워드를 감지했습니다! 더 정확한 추천을 위해 감성 분석을 수행하겠습니다...',
+          timestamp: new Date()
+        };
+        
+        setChatHistory(prev => [...prev, sentimentStartMessage]);
+        await new Promise(resolve => setTimeout(resolve, 1000));
+
+        // 감성 기반 검색 실행
+        await getSentimentBasedRecommendations(userMessageText);
+      } else {
+        console.log('💬 일반 대화 모드, 기본 검색 사용');
+        
+        // AI 응답 생성
+        const aiResponses = generateAIResponse(userMessageText);
+
+        // 순차적으로 AI 응답 추가
+        for (let i = 0; i < aiResponses.length; i++) {
+          await new Promise(resolve => setTimeout(resolve, 1000));
+          
+          const aiMessage = {
+            id: `ai-response-${Date.now()}-${i}`,
+            type: 'ai',
+            message: aiResponses[i],
+            timestamp: new Date()
+          };
+
+          setChatHistory(prev => [...prev, aiMessage]);
+        }
+
+        // 기본 장소 추천 실행
+        setTimeout(() => {
+          getRecommendations();
+        }, 500);
+      }
+
+      // 게스트 사용량 증가
+      if (!isAuthenticated) {
+        const currentUsage = parseInt(localStorage.getItem('guestAIUsage') || '0');
+        localStorage.setItem('guestAIUsage', (currentUsage + 1).toString());
+        
+        // 사용량 상태 업데이트
+        setUsageLimit(prev => ({
+          ...prev,
+          used: currentUsage + 1,
+          remaining: Math.max(0, prev.limit - (currentUsage + 1)),
+          exceeded: (currentUsage + 1) >= prev.limit
+        }));
+      }
+
+    } catch (error) {
+      console.error('채팅 처리 실패:', error);
+      
+      const errorMessage = {
+        id: `ai-error-${Date.now()}`,
         type: 'ai',
-        message: aiResponses[i],
+        message: '죄송합니다. 처리 중 오류가 발생했습니다. 다시 시도해주세요.',
         timestamp: new Date()
       };
-
-      setChatHistory(prev => [...prev, aiMessage]);
+      
+      setChatHistory(prev => [...prev, errorMessage]);
+    } finally {
+      setIsTyping(false);
     }
-
-    setIsTyping(false);
-
-    // 마지막 응답 후 추천 실행
-    setTimeout(() => {
-      getRecommendations();
-    }, 500);
-  };
-
-  const handleFilterChange = (key, value) => {
-    setFilters(prev => ({
-      ...prev,
-      [key]: value
-    }));
   };
 
   const renderStars = (rating) => {
@@ -497,50 +637,6 @@ const SmartRecommendation = ({ meetingId, onPlaceSelected }) => {
       />
     ));
   };
-
-  const startConversation = () => {
-    setConversationMode(true);
-    setChatHistory(prev => [...prev, {
-      id: prev.length + 1,
-      type: 'ai',
-      message: '좋아요! 어떤 장소를 찾고 계신지 자유롭게 말씀해 주세요. 예를 들어 "친구들과 맛있는 저녁을 먹을 곳을 찾고 있어"라고 말씀해 주시면 됩니다! 😊',
-      timestamp: new Date()
-    }]);
-  };
-
-  // 인증되지 않은 사용자에게 로그인 안내 (제거 - 게스트도 사용 가능)
-  // if (!isAuthenticated) {
-  //   return (
-  //     <div className="bg-white rounded-lg shadow p-6">
-  //       <div className="flex items-center mb-6">
-  //         <SparklesIcon className="h-6 w-6 text-primary-600 mr-2" />
-  //         <h3 className="text-lg font-semibold text-gray-900">AI 대화형 장소 추천</h3>
-  //       </div>
-  //       <div className="text-center py-8">
-  //         <div className="text-6xl mb-4">🔒</div>
-  //         <h4 className="text-xl font-bold text-gray-900 mb-2">로그인이 필요합니다</h4>
-  //         <p className="text-gray-600 mb-6">
-  //           AI 장소 추천 기능은 프리미엄 회원 전용 서비스입니다.<br />
-  //           로그인하시면 무료로 모든 기능을 이용하실 수 있어요!
-  //         </p>
-  //         <div className="space-x-4">
-  //           <a
-  //             href="/login"
-  //             className="bg-primary-600 text-white px-6 py-2 rounded-lg hover:bg-primary-700 transition duration-200"
-  //           >
-  //             로그인하기
-  //           </a>
-  //           <a
-  //             href="/register"
-  //             className="bg-gray-200 text-gray-700 px-6 py-2 rounded-lg hover:bg-gray-300 transition duration-200"
-  //           >
-  //             회원가입하기
-  //           </a>
-  //         </div>
-  //       </div>
-  //     </div>
-  //   );
-  // }
 
   return (
     <div className="bg-white rounded-lg shadow p-6">
@@ -696,85 +792,47 @@ const SmartRecommendation = ({ meetingId, onPlaceSelected }) => {
             {usageLimit.isGuest && <span className="ml-2 text-blue-600">• 매일 자정 리셋</span>}
           </div>
         )}
-
-        {/* {!conversationMode && (
-          <div className="mt-3 text-center">
-            <button
-              onClick={startConversation}
-              className="text-sm text-blue-600 hover:text-blue-800 font-medium"
-            >
-              🤖 AI와 대화로 맞춤 추천 받기
-            </button>
-          </div>
-        )} */}
       </div>
 
-      {/* 기존 필터 섹션 및 즉시 추천 버튼 숨김 처리 */}
-      {/* 
-      <div className="space-y-4 mb-6">
-        <div>
-          <label className="block text-sm font-medium text-gray-700 mb-2">
-            카테고리 (AI가 자동으로 감지합니다)
-          </label>
-          <div className="grid grid-cols-3 gap-2">
-            {categories.map(category => (
+      {/* 그룹투표 추가 안내 */}
+      {showAddToVotingPrompt && meetingId && (
+        <div className="mb-4 p-4 bg-gradient-to-r from-green-50 to-blue-50 rounded-lg border border-green-200">
+          <h5 className="font-medium text-green-800 mb-2 flex items-center">
+            ✨ 추천 장소를 그룹투표에 추가하시겠습니까?
+          </h5>
+          <p className="text-sm text-green-700 mb-3">
+            아래 추천 장소들을 선택하여 그룹투표에 추가할 수 있습니다.
+          </p>
+          <div className="flex flex-wrap gap-2">
+            {recommendations.filter(place => !place.addedToVoting).map((place) => (
               <button
-                key={category.value}
-                onClick={() => handleFilterChange('category', category.value)}
-                className={`p-2 text-sm rounded-lg border transition-colors ${
-                  filters.category === category.value
-                    ? 'border-primary-500 bg-primary-50 text-primary-700'
-                    : 'border-gray-300 text-gray-600 hover:bg-gray-50'
-                }`}
+                key={place.id}
+                onClick={() => addToGroupVoting(place)}
+                disabled={addingToVoting[place.id]}
+                className="bg-green-100 hover:bg-green-200 text-green-800 px-3 py-2 rounded-lg text-sm font-medium transition duration-200 flex items-center disabled:opacity-50"
               >
-                <span className="mr-1">{category.icon}</span>
-                {category.label}
+                {addingToVoting[place.id] ? (
+                  <>
+                    <div className="animate-spin rounded-full h-3 w-3 border-b-2 border-green-600 mr-1"></div>
+                    추가 중...
+                  </>
+                ) : (
+                  <>
+                    <PlusIcon className="h-3 w-3 mr-1" />
+                    {place.name}
+                  </>
+                )}
               </button>
             ))}
           </div>
+          {recommendations.every(place => place.addedToVoting) && (
+            <div className="mt-3 p-2 bg-blue-100 rounded text-sm text-blue-800 flex items-center">
+              <CheckIcon className="h-4 w-4 mr-1" />
+              모든 장소가 그룹투표에 추가되었습니다! ✅
+            </div>
+          )}
         </div>
-
-        <div>
-          <label className="block text-sm font-medium text-gray-700 mb-2">
-            교통수단 (AI가 자동으로 감지합니다)
-          </label>
-          <div className="grid grid-cols-3 gap-2">
-            {transportModes.map(mode => (
-              <button
-                key={mode.value}
-                onClick={() => handleFilterChange('transportMode', mode.value)}
-                className={`p-2 text-sm rounded-lg border transition-colors ${
-                  filters.transportMode === mode.value
-                    ? 'border-primary-500 bg-primary-50 text-primary-700'
-                    : 'border-gray-300 text-gray-600 hover:bg-gray-50'
-                }`}
-              >
-                <span className="mr-1">{mode.icon}</span>
-                {mode.label}
-              </button>
-            ))}
-          </div>
-        </div>
-      </div>
-
-      <button
-        onClick={getRecommendations}
-        disabled={loading}
-        className="w-full bg-gradient-to-r from-primary-600 to-secondary-600 text-white py-3 px-4 rounded-lg hover:from-primary-700 hover:to-secondary-700 transition duration-200 disabled:opacity-50 flex items-center justify-center mb-6"
-      >
-        {loading ? (
-          <>
-            <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white mr-2"></div>
-            AI가 분석 중...
-          </>
-        ) : (
-          <>
-            <SparklesIcon className="h-4 w-4 mr-2" />
-            즉시 추천받기
-          </>
-        )}
-      </button>
-      */}
+      )}
 
       {/* 추천 결과 */}
       {recommendations.length > 0 && (
@@ -783,11 +841,16 @@ const SmartRecommendation = ({ meetingId, onPlaceSelected }) => {
             <SparklesIcon className="h-5 w-5 mr-2 text-primary-600" />
             AI 맞춤 추천 장소 ({recommendations.length}개)
           </h4>
+          
           <div className="space-y-4">
             {recommendations.map((place, index) => (
               <div
                 key={place.id}
-                className="border rounded-lg p-4 hover:bg-gradient-to-r hover:from-gray-50 hover:to-blue-50 transition-all transform hover:scale-[1.01]"
+                className={`border rounded-lg p-4 transition-all transform hover:scale-[1.01] ${
+                  place.addedToVoting 
+                    ? 'bg-gradient-to-r from-green-50 to-emerald-50 border-green-200' 
+                    : 'hover:bg-gradient-to-r hover:from-gray-50 hover:to-blue-50'
+                }`}
               >
                 <div className="flex justify-between items-start">
                   <div className="flex-1">
@@ -798,6 +861,12 @@ const SmartRecommendation = ({ meetingId, onPlaceSelected }) => {
                       <span className="bg-gray-100 text-gray-700 text-xs px-2 py-1 rounded mr-2">
                         {categories.find(c => c.value === place.category)?.icon} {categories.find(c => c.value === place.category)?.label || place.category}
                       </span>
+                      {place.addedToVoting && (
+                        <span className="bg-green-100 text-green-800 text-xs px-2 py-1 rounded mr-2 flex items-center">
+                          <CheckIcon className="h-3 w-3 mr-1" />
+                          투표 추가됨
+                        </span>
+                      )}
                       <div className="flex items-center">
                         {renderStars(place.rating)}
                         <span className="ml-1 text-sm text-gray-600">
@@ -814,17 +883,75 @@ const SmartRecommendation = ({ meetingId, onPlaceSelected }) => {
                       평균 이동시간: {place.estimatedTravelTime}분
                     </div>
                     
+                    {/* 감성 분석 정보 표시 */}
+                    {place.sentiment_score !== undefined && place.sentiment_score > 0 && (
+                      <div className="mb-2 p-2 bg-gradient-to-r from-purple-50 to-pink-50 rounded border-l-2 border-purple-400">
+                        <div className="flex items-center justify-between mb-1">
+                          <span className="text-xs font-medium text-purple-700">
+                            🎭 감성 분석 점수
+                          </span>
+                          <span className={`text-xs px-2 py-1 rounded-full ${
+                            place.sentiment_score >= 70 
+                              ? 'bg-green-100 text-green-800' 
+                              : place.sentiment_score >= 40 
+                                ? 'bg-yellow-100 text-yellow-800'
+                                : 'bg-gray-100 text-gray-800'
+                          }`}>
+                            {place.sentiment_score}점
+                          </span>
+                        </div>
+                        {place.matched_keywords && place.matched_keywords.length > 0 && (
+                          <div className="flex flex-wrap gap-1">
+                            {place.matched_keywords.slice(0, 4).map((keyword, idx) => (
+                              <span 
+                                key={idx}
+                                className="text-xs bg-purple-100 text-purple-700 px-2 py-1 rounded"
+                              >
+                                {keyword}
+                              </span>
+                            ))}
+                            {place.matched_keywords.length > 4 && (
+                              <span className="text-xs text-purple-600">
+                                +{place.matched_keywords.length - 4}개 더
+                              </span>
+                            )}
+                          </div>
+                        )}
+                      </div>
+                    )}
+                    
                     <p className="text-xs text-green-600 bg-gradient-to-r from-green-50 to-emerald-50 p-2 rounded border-l-2 border-green-400">
                       🤖 AI 분석: {place.reason}
                     </p>
                   </div>
                   
-                  <button
-                    onClick={() => onPlaceSelected && onPlaceSelected(place)}
-                    className="ml-4 bg-gradient-to-r from-secondary-600 to-primary-600 text-white px-4 py-2 rounded-lg text-sm hover:from-secondary-700 hover:to-primary-700 transition duration-200 transform hover:scale-105"
-                  >
-                    ✨ 선택
-                  </button>
+                  <div className="ml-4 flex flex-col space-y-2">
+                    {meetingId && !place.addedToVoting && (
+                      <button
+                        onClick={() => addToGroupVoting(place)}
+                        disabled={addingToVoting[place.id]}
+                        className="bg-gradient-to-r from-green-600 to-emerald-600 text-white px-4 py-2 rounded-lg text-sm hover:from-green-700 hover:to-emerald-700 transition duration-200 transform hover:scale-105 flex items-center disabled:opacity-50"
+                      >
+                        {addingToVoting[place.id] ? (
+                          <>
+                            <div className="animate-spin rounded-full h-3 w-3 border-b-2 border-white mr-1"></div>
+                            추가 중...
+                          </>
+                        ) : (
+                          <>
+                            <PlusIcon className="h-3 w-3 mr-1" />
+                            투표 추가
+                          </>
+                        )}
+                      </button>
+                    )}
+                    <button
+                      onClick={() => onPlaceSelected && onPlaceSelected(place)}
+                      className="bg-gradient-to-r from-secondary-600 to-primary-600 text-white px-4 py-2 rounded-lg text-sm hover:from-secondary-700 hover:to-primary-700 transition duration-200 transform hover:scale-105"
+                    >
+                      ✨ 선택
+                    </button>
+                  </div>
                 </div>
               </div>
             ))}
@@ -838,12 +965,34 @@ const SmartRecommendation = ({ meetingId, onPlaceSelected }) => {
           <h5 className="font-medium text-blue-900 mb-2 flex items-center">
             💡 AI 대화 추천 사용법
           </h5>
-          <ul className="text-sm text-blue-800 space-y-1">
-            <li>• "친구들과 맛있는 한식집 찾고 있어요"</li>
-            <li>• "차로 이동할 수 있는 카페 추천해줘"</li>
-            <li>• "지하철로 갈 수 있는 놀거리 있나요?"</li>
-            <li>• "공원에서 산책하고 싶어요"</li>
-          </ul>
+          <div className="grid md:grid-cols-2 gap-4">
+            <div>
+              <h6 className="font-medium text-blue-800 mb-1">🎭 감성 키워드 추천</h6>
+              <ul className="text-sm text-blue-800 space-y-1">
+                <li>• "분위기 좋은 카페 추천해줘"</li>
+                <li>• "맛있는 한식집 찾고 있어요"</li>
+                <li>• "아늑한 레스토랑이 좋겠어요"</li>
+                <li>• "가성비 좋은 음식점 어때요?"</li>
+              </ul>
+            </div>
+            <div>
+              <h6 className="font-medium text-blue-800 mb-1">💬 일반 대화</h6>
+              <ul className="text-sm text-blue-800 space-y-1">
+                <li>• "친구들과 만날 곳 찾아줘"</li>
+                <li>• "차로 이동할 수 있는 카페"</li>
+                <li>• "지하철로 갈 수 있는 놀거리"</li>
+                <li>• "공원에서 산책하고 싶어요"</li>
+              </ul>
+            </div>
+          </div>
+          <div className="mt-3 p-3 bg-gradient-to-r from-purple-50 to-pink-50 rounded border border-purple-200">
+            <p className="text-xs text-purple-700 font-medium mb-1">
+              🎭 감성 키워드 기능 NEW!
+            </p>
+            <p className="text-xs text-purple-600">
+              '분위기 좋은', '맛있는', '아늑한' 등의 감성 표현을 사용하면 Google Maps 리뷰를 분석하여 더 정확한 추천을 받을 수 있습니다!
+            </p>
+          </div>
           <p className="text-xs text-blue-600 mt-2">
             자연스럽게 대화하시면 AI가 여러분의 니즈를 파악해서 완벽한 장소를 추천해드립니다! 🎯
           </p>

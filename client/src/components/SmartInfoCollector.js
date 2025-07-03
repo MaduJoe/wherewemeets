@@ -6,7 +6,12 @@ import {
   StarIcon, 
   ShareIcon,
   DevicePhoneMobileIcon,
-  EnvelopeIcon
+  EnvelopeIcon,
+  UserGroupIcon,
+  ClockIcon,
+  MapPinIcon,
+  CalendarIcon,
+  PlusIcon
 } from '@heroicons/react/24/outline';
 
 const SmartInfoCollector = ({ 

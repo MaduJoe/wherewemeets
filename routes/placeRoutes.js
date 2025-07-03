@@ -1,10 +1,38 @@
 const express = require('express');
 const axios = require('axios');
+const sentimentAnalysisService = require('../services/sentimentAnalysisService');
 const router = express.Router();
 
 // Kakao API 키 (환경변수에서 가져오기)
 const KAKAO_API_KEY = process.env.KAKAO_API_KEY || 'f562a71b13dcad881fee2b157d93121c';
 const GOOGLE_API_KEY = process.env.GOOGLE_PLACES_API_KEY || 'YOUR_GOOGLE_API_KEY';
+
+// 장소명 정리 함수 (전역 함수로 통합)
+const cleanPlaceName = (name) => {
+  if (!name) return '';
+  let cleaned = name.trim();
+  
+  // 카테고리 정보 제거 (가장 먼저 처리)
+  cleaned = cleaned.replace(/^(카페|맛집|레스토랑|커피전문점|음식점|디저트|브런치|술집|바|펜션|호텔|모텔|노래방|볼링장|영화관|공원|마트|백화점|쇼핑몰)\s*:\s*/i, '');
+  
+  // 전화번호 패턴 제거
+  cleaned = cleaned.replace(/\b\d{2,4}-\d{3,4}-\d{4}\b/g, '');
+  cleaned = cleaned.replace(/\b\d{3}-\d{4}-\d{4}\b/g, '');
+  cleaned = cleaned.replace(/\b\d{4}-\d{4}\b/g, '');
+  
+  // 괄호 안의 전화번호나 기타 정보 제거
+  cleaned = cleaned.replace(/\([^)]*\d{3,4}[^)]*\)/g, '');
+  
+  // 카테고리 정보가 뒤에 있는 경우도 제거
+  cleaned = cleaned.replace(/\s+(카페|맛집|레스토랑|커피전문점|음식점|디저트|브런치|술집|바|펜션|호텔|모텔|노래방|볼링장|영화관|공원|마트|백화점|쇼핑몰)$/i, '');
+  cleaned = cleaned.replace(/\s*\((카페|맛집|레스토랑|커피전문점|음식점|디저트|브런치|술집|바|펜션|호텔|모텔|노래방|볼링장|영화관|공원|마트|백화점|쇼핑몰)\)$/i, '');
+  
+  // 연속된 공백 정리
+  cleaned = cleaned.replace(/\s+/g, ' ');
+  cleaned = cleaned.trim();
+  
+  return cleaned || name; // 정리 결과가 비어있으면 원본 반환
+};
 
 // Google Places API로 장소 상세 정보 및 리뷰 가져오기
 const getGooglePlaceDetails = async (placeName, address) => {
@@ -123,32 +151,7 @@ router.get('/search', async (req, res) => {
       params: params
     });
 
-    // 장소명에서 전화번호나 불필요한 정보 제거하는 함수
-    const cleanPlaceName = (name) => {
-      if (!name) return '';
-      let cleaned = name.trim();
-      
-      // 카테고리 정보 제거 (가장 먼저 처리)
-      cleaned = cleaned.replace(/^(카페|맛집|레스토랑|커피전문점|음식점|디저트|브런치|술집|바|펜션|호텔|모텔|노래방|볼링장|영화관|공원|마트|백화점|쇼핑몰)\s*:\s*/i, '');
-      
-      // 전화번호 패턴 제거
-      cleaned = cleaned.replace(/\b\d{2,4}-\d{3,4}-\d{4}\b/g, '');
-      cleaned = cleaned.replace(/\b\d{3}-\d{4}-\d{4}\b/g, '');
-      cleaned = cleaned.replace(/\b\d{4}-\d{4}\b/g, '');
-      
-      // 괄호 안의 전화번호나 기타 정보 제거
-      cleaned = cleaned.replace(/\([^)]*\d{3,4}[^)]*\)/g, '');
-      
-      // 카테고리 정보가 뒤에 있는 경우도 제거
-      cleaned = cleaned.replace(/\s+(카페|맛집|레스토랑|커피전문점|음식점|디저트|브런치|술집|바|펜션|호텔|모텔|노래방|볼링장|영화관|공원|마트|백화점|쇼핑몰)$/i, '');
-      cleaned = cleaned.replace(/\s*\((카페|맛집|레스토랑|커피전문점|음식점|디저트|브런치|술집|바|펜션|호텔|모텔|노래방|볼링장|영화관|공원|마트|백화점|쇼핑몰)\)$/i, '');
-      
-      // 연속된 공백 정리
-      cleaned = cleaned.replace(/\s+/g, ' ');
-      cleaned = cleaned.trim();
-      
-      return cleaned || name; // 정리 결과가 비어있으면 원본 반환
-    };
+    // 장소명 정리 함수는 이미 전역으로 정의됨
 
     // 응답 데이터 변환 (Google Places API 리뷰 통합)
     // 성능 최적화: 처음 5개 장소만 Google API 호출
@@ -272,32 +275,7 @@ router.get('/category/:categoryCode', async (req, res) => {
       }
     });
 
-    // 장소명 정리 함수 (동일한 로직)
-    const cleanPlaceName = (name) => {
-      if (!name) return '';
-      let cleaned = name.trim();
-      
-      // 카테고리 정보 제거 (가장 먼저 처리)
-      cleaned = cleaned.replace(/^(카페|맛집|레스토랑|커피전문점|음식점|디저트|브런치|술집|바|펜션|호텔|모텔|노래방|볼링장|영화관|공원|마트|백화점|쇼핑몰)\s*:\s*/i, '');
-      
-      // 전화번호 패턴 제거
-      cleaned = cleaned.replace(/\b\d{2,4}-\d{3,4}-\d{4}\b/g, '');
-      cleaned = cleaned.replace(/\b\d{3}-\d{4}-\d{4}\b/g, '');
-      cleaned = cleaned.replace(/\b\d{4}-\d{4}\b/g, '');
-      
-      // 괄호 안의 전화번호나 기타 정보 제거
-      cleaned = cleaned.replace(/\([^)]*\d{3,4}[^)]*\)/g, '');
-      
-      // 카테고리 정보가 뒤에 있는 경우도 제거
-      cleaned = cleaned.replace(/\s+(카페|맛집|레스토랑|커피전문점|음식점|디저트|브런치|술집|바|펜션|호텔|모텔|노래방|볼링장|영화관|공원|마트|백화점|쇼핑몰)$/i, '');
-      cleaned = cleaned.replace(/\s*\((카페|맛집|레스토랑|커피전문점|음식점|디저트|브런치|술집|바|펜션|호텔|모텔|노래방|볼링장|영화관|공원|마트|백화점|쇼핑몰)\)$/i, '');
-      
-      // 연속된 공백 정리
-      cleaned = cleaned.replace(/\s+/g, ' ');
-      cleaned = cleaned.trim();
-      
-      return cleaned || name;
-    };
+    // 장소명 정리 함수는 이미 전역으로 정의됨
 
     const places = response.data.documents.map(place => ({
       id: place.id,
@@ -353,6 +331,210 @@ router.get('/detail/:placeId', async (req, res) => {
     res.status(500).json({
       success: false,
       message: '장소 상세 정보 조회 중 오류가 발생했습니다.'
+    });
+  }
+});
+
+// 감성 키워드 기반 장소 검색
+router.get('/search/sentiment', async (req, res) => {
+  console.log('=== 감성 키워드 기반 장소 검색 API 호출됨 ===');
+  console.log('쿼리 파라미터:', req.query);
+  
+  try {
+    const { query, emotionalKeywords, size = 10, x, y, radius = 5000 } = req.query;
+    
+    if (!query) {
+      return res.status(400).json({ 
+        success: false, 
+        message: '검색어가 필요합니다.' 
+      });
+    }
+
+    // 1단계: 사용자 입력에서 감성 키워드 추출
+    let parsedEmotionalKeywords;
+    if (emotionalKeywords) {
+      try {
+        parsedEmotionalKeywords = typeof emotionalKeywords === 'string' 
+          ? JSON.parse(emotionalKeywords) 
+          : emotionalKeywords;
+      } catch (e) {
+        parsedEmotionalKeywords = sentimentAnalysisService.extractEmotionalKeywords(query);
+      }
+    } else {
+      parsedEmotionalKeywords = sentimentAnalysisService.extractEmotionalKeywords(query);
+    }
+
+    console.log('추출된 감성 키워드:', parsedEmotionalKeywords);
+
+    // 2단계: 기본 장소 검색 (Kakao API)
+    const kakaoUrl = 'https://dapi.kakao.com/v2/local/search/keyword.json';
+    const headers = {
+      'Authorization': `KakaoAK ${KAKAO_API_KEY}`
+    };
+    
+    let params = {
+      query: query,
+      size: Math.min(size * 2, 15), // 더 많은 후보를 가져와서 필터링
+      page: 1,
+      sort: 'accuracy'
+    };
+
+    // 좌표 기반 검색 (선택적)
+    if (x && y) {
+      params.x = x;
+      params.y = y;
+      params.radius = Math.min(radius, 20000);
+      params.sort = 'distance';
+    }
+    
+    console.log('Kakao API 요청 파라미터:', params);
+
+    const response = await axios.get(kakaoUrl, {
+      headers: headers,
+      params: params
+    });
+
+    if (!response.data.documents || response.data.documents.length === 0) {
+      return res.json({
+        success: true,
+        places: [],
+        sentiment_analysis: {
+          extracted_keywords: parsedEmotionalKeywords,
+          message: '검색 조건에 맞는 장소를 찾을 수 없습니다.'
+        }
+      });
+    }
+
+    // 3단계: 상위 후보들에 대해 Google Places API 리뷰 데이터 수집 및 감성 분석
+    console.log(`${response.data.documents.length}개 장소에 대해 감성 분석 시작`);
+    
+    const analyzedPlaces = await Promise.all(
+      response.data.documents.map(async (place) => {
+        const cleanedName = cleanPlaceName(place.place_name);
+        
+        // Google Places API로 리뷰 데이터 가져오기
+        const googleData = await getGooglePlaceDetails(cleanedName, place.address_name);
+        
+        // 기본 장소 정보 구성
+        const placeInfo = {
+          id: place.id,
+          name: cleanedName,
+          category: place.category_name.split(' > ').pop(),
+          address: place.address_name,
+          roadAddress: place.road_address_name,
+          coordinates: {
+            x: parseFloat(place.x),
+            y: parseFloat(place.y)
+          },
+          phone: place.phone || null,
+          rating: googleData?.rating || 0,
+          reviews: googleData?.reviews || [],
+          reviewCount: googleData?.reviewCount || 0,
+          photos: googleData?.photos || [],
+          url: place.place_url,
+          distance: place.distance ? parseInt(place.distance) : null,
+          source: googleData ? 'kakao_google_hybrid' : 'kakao_only'
+        };
+
+        // 감성 분석 적용
+        if (placeInfo.reviews && placeInfo.reviews.length > 0) {
+          return sentimentAnalysisService.calculatePlaceSentimentScore(placeInfo, parsedEmotionalKeywords);
+        } else {
+          return {
+            ...placeInfo,
+            sentiment_analysis: {
+              score: 0,
+              confidence: 0,
+              matched_keywords: [],
+              recommendation_reason: '리뷰 정보가 없어 감성 분석을 수행할 수 없습니다.'
+            }
+          };
+        }
+      })
+    );
+
+    // 4단계: 감성 점수 기준으로 정렬
+    const sortedPlaces = analyzedPlaces
+      .filter(place => place.sentiment_analysis.score > 0 || place.reviews.length === 0) // 점수가 0 이상이거나 리뷰가 없는 경우
+      .sort((a, b) => {
+        // 먼저 감성 점수로 정렬
+        if (b.sentiment_analysis.score !== a.sentiment_analysis.score) {
+          return b.sentiment_analysis.score - a.sentiment_analysis.score;
+        }
+        // 감성 점수가 같다면 Google 평점으로 정렬
+        return (b.rating || 0) - (a.rating || 0);
+      })
+      .slice(0, size); // 요청한 개수만큼만 반환
+
+    console.log(`감성 분석 완료: ${sortedPlaces.length}개 장소 추천`);
+
+    // 5단계: 분석 결과와 함께 응답
+    res.json({
+      success: true,
+      places: sortedPlaces,
+      sentiment_analysis: {
+        extracted_keywords: parsedEmotionalKeywords,
+        total_analyzed: analyzedPlaces.length,
+        recommended_count: sortedPlaces.length,
+        analysis_summary: {
+          high_score_places: sortedPlaces.filter(p => p.sentiment_analysis.score >= 70).length,
+          medium_score_places: sortedPlaces.filter(p => p.sentiment_analysis.score >= 40 && p.sentiment_analysis.score < 70).length,
+          low_score_places: sortedPlaces.filter(p => p.sentiment_analysis.score < 40).length
+        }
+      },
+      meta: {
+        original_search_count: response.data.documents.length,
+        sentiment_filtered_count: sortedPlaces.length
+      }
+    });
+
+  } catch (error) {
+    console.error('감성 키워드 기반 검색 실패:', error.response?.data || error.message);
+    
+    res.status(500).json({
+      success: false,
+      message: '감성 키워드 기반 검색 중 오류가 발생했습니다.',
+      error: process.env.NODE_ENV === 'development' ? error.message : undefined
+    });
+  }
+});
+
+// 감성 키워드 추출 전용 엔드포인트 (테스트/디버깅용)
+router.post('/sentiment/extract', (req, res) => {
+  try {
+    const { text } = req.body;
+    
+    if (!text) {
+      return res.status(400).json({
+        success: false,
+        message: '분석할 텍스트가 필요합니다.'
+      });
+    }
+
+    const extractedKeywords = sentimentAnalysisService.extractEmotionalKeywords(text);
+    
+    res.json({
+      success: true,
+      input_text: text,
+      extracted_keywords: extractedKeywords,
+      analysis_summary: {
+        total_positive_keywords: Object.values(extractedKeywords)
+          .flat()
+          .filter(k => k.sentiment === 'positive').length,
+        total_negative_keywords: Object.values(extractedKeywords)
+          .flat()
+          .filter(k => k.sentiment === 'negative').length,
+        overall_sentiment: extractedKeywords.overall_sentiment,
+        sentiment_score: extractedKeywords.sentiment_score
+      }
+    });
+
+  } catch (error) {
+    console.error('감성 키워드 추출 실패:', error);
+    res.status(500).json({
+      success: false,
+      message: '감성 키워드 추출 중 오류가 발생했습니다.',
+      error: process.env.NODE_ENV === 'development' ? error.message : undefined
     });
   }
 });

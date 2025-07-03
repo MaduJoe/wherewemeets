@@ -4,9 +4,7 @@ import SocialLoginPrompt from './SocialLoginPrompt';
 import {
   ChartBarIcon,
   SparklesIcon,
-  ClockIcon,
   ShareIcon,
-  BellIcon,
   UserGroupIcon,
   LockClosedIcon,
   CheckCircleIcon
@@ -15,7 +13,7 @@ import {
 const PremiumFeatures = () => {
   const { user, userAnalytics } = useAuth();
   const [showLoginPrompt, setShowLoginPrompt] = useState(false);
-  const [selectedFeature, setSelectedFeature] = useState('');
+  // const [selectedFeature, setSelectedFeature] = useState('');
 
   const premiumFeatures = [
     {
@@ -82,7 +80,7 @@ const PremiumFeatures = () => {
 
   const handleFeatureClick = (featureId) => {
     if (!user || user.isGuest) {
-      setSelectedFeature(featureId);
+      // setSelectedFeature(featureId);
       setShowLoginPrompt(true);
     } else {
       // 이미 로그인된 사용자는 해당 기능으로 이동

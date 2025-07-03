@@ -58,11 +58,40 @@ const MeetingPlannerPage = () => {
   const { id } = useParams();
   const navigate = useNavigate();
   const { user } = useAuth();
-  // 초기 탭 설정 (주최자: recommendation, 참여자: voting)
-  const [activeTab, setActiveTab] = useState('recommendation');
+  // 초기 탭 설정 - sessionStorage에서 복원, 없으면 기본값 'recommendation'
+  const getInitialTab = () => {
+    if (typeof window !== 'undefined') {
+      const savedTab = sessionStorage.getItem(`meetingTab_${id}`);
+      return savedTab || 'recommendation';
+    }
+    return 'recommendation';
+  };
+  
+  const [activeTab, setActiveTabState] = useState(getInitialTab);
   const [meeting, setMeeting] = useState(null);
   const [loading, setLoading] = useState(true);
   const [voteParticipants, setVoteParticipants] = useState([]);
+
+  // sessionStorage에 탭 상태를 저장하는 setActiveTab 함수
+  const setActiveTab = useCallback((tabId) => {
+    setActiveTabState(tabId);
+    if (typeof window !== 'undefined' && id) {
+      sessionStorage.setItem(`meetingTab_${id}`, tabId);
+    }
+  }, [id]);
+
+  // ID가 변경될 때 저장된 탭 상태 복원
+  useEffect(() => {
+    if (id && typeof window !== 'undefined') {
+      const savedTab = sessionStorage.getItem(`meetingTab_${id}`);
+      if (savedTab) {
+        setActiveTabState(savedTab);
+      } else {
+        // 저장된 탭이 없으면 기본값 설정
+        setActiveTabState('recommendation');
+      }
+    }
+  }, [id]);
 
   // 페이지 로드 시 즉시 스크롤 최상단으로 이동
   useLayoutEffect(() => {
@@ -493,22 +522,30 @@ const MeetingPlannerPage = () => {
     ? allTabs.filter(tab => tab.id === 'recommendation' || tab.id === 'voting' || tab.id === 'random')
     : allTabs;
 
-  // 역할에 따른 기본 탭 설정
+  // 역할에 따른 기본 탭 설정 (sessionStorage에 저장된 것이 없을 때만)
   useEffect(() => {
     // id가 있고 토큰 확인이 완료된 후에만 탭 설정
     if (!id) return;
+    
+    // sessionStorage에 저장된 탭이 있는지 확인
+    const savedTab = sessionStorage.getItem(`meetingTab_${id}`);
+    if (savedTab) {
+      // 저장된 탭이 있으면 그것을 사용 (복원 완료)
+      console.log('저장된 탭 복원:', savedTab);
+      return;
+    }
     
     console.log('탭 설정 useEffect:', { isOwner, activeTab, id });
     
     // 약간의 지연을 두어 토큰 저장이 완료되도록 함
     setTimeout(() => {
-      if (!isOwner && activeTab === 'recommendation') {
-        console.log('참여자로 인식 - recommendation 탭 유지 (이제 참여자도 장소 검색 가능)');
-        // 참여자도 recommendation 탭을 사용할 수 있으므로 탭 변경하지 않음
+      // 저장된 탭이 없으면 기본 탭 설정
+      if (!savedTab) {
+        console.log('기본 탭 설정: recommendation');
+        setActiveTab('recommendation');
       }
-      // 주최자와 참여자 모두 기본값이 'recommendation'
     }, 100);
-  }, [isOwner, activeTab, id]);
+  }, [isOwner, id, setActiveTab]);
 
   // 후보 장소들을 기반으로 미팅 카테고리 결정하는 함수
   const getMeetingCategory = (candidatePlaces) => {

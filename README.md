@@ -7,6 +7,7 @@
 ## ✨ 주요 기능
 
 - 🤖 **AI 장소 추천**: Gemini AI가 맞춤형 장소를 추천
+- 🎭 **감성 키워드 분석**: "분위기 좋은", "맛있는" 등 감성 표현을 분석하여 Google Maps 리뷰 기반 정확한 추천
 - 🗺️ **지도 기반 검색**: Kakao Map API로 실제 장소 검색
 - 🗳️ **그룹 투표**: 실시간 투표로 민주적 장소 결정
 - 🎲 **공정한 랜덤 선택**: 룰렛으로 최종 장소 결정
@@ -31,6 +32,7 @@
 
 ### APIs
 - Kakao Local API (장소 검색)
+- Google Places API (리뷰 분석)
 - Google Gemini AI (장소 추천)
 - Stripe (결제)
 
@@ -71,6 +73,7 @@ npm start
 MONGODB_URI=mongodb+srv://...
 JWT_SECRET=your-jwt-secret
 KAKAO_API_KEY=your-kakao-key
+GOOGLE_PLACES_API_KEY=your-google-places-key
 GEMINI_API_KEY=your-gemini-key
 NODE_ENV=production
 PORT=3000
@@ -90,6 +93,37 @@ PORT=3000
 - 다크모드 지원
 - 직관적인 사용자 인터페이스
 - 실시간 피드백
+
+## 🎭 감성 키워드 기반 추천 시스템
+
+### 개요
+사용자가 "분위기 좋은", "맛있는", "아늑한" 등의 감성적인 표현을 사용할 때, 단순한 키워드 매칭이 아닌 실제 사용자 리뷰를 분석하여 더 정확한 장소를 추천하는 시스템입니다.
+
+### 작동 원리
+1. **감성 키워드 감지**: 사용자 입력에서 감성적 표현을 자동 감지
+2. **Kakao API 검색**: 기본 장소 정보 수집
+3. **Google Places API 연동**: 해당 장소의 실제 사용자 리뷰 수집
+4. **감성 분석**: 리뷰에서 감성 키워드 매칭 및 점수 계산
+5. **스마트 랭킹**: 감성 점수와 평점을 종합하여 최적의 장소 추천
+
+### 지원 감성 카테고리
+- **분위기**: 분위기 좋은, 아늑한, 편안한, 로맨틱, 세련된
+- **음식**: 맛있는, 신선한, 유명한, 인기있는
+- **서비스**: 친절한, 빠른, 정확한, 세심한
+- **가격**: 가성비, 저렴한, 합리적
+- **위치**: 접근성, 편리한, 가까운
+
+### API 엔드포인트
+```javascript
+// 감성 키워드 기반 장소 검색
+GET /api/places/search/sentiment?query=분위기 좋은 카페
+
+// 감성 키워드 추출 (테스트용)
+POST /api/places/sentiment/extract
+```
+
+### 테스트
+감성 키워드 기능을 테스트하려면 `/test/sentiment-test.html` 파일을 브라우저에서 열어보세요.
 
 ## 📄 라이센스
 

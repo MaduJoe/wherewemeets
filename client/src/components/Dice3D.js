@@ -1,5 +1,5 @@
-import React, { useRef, useEffect, useState, useMemo } from 'react';
-import { Canvas, useFrame } from '@react-three/fiber';
+import React, { useEffect, useState } from 'react';
+import { Canvas } from '@react-three/fiber';
 import { useBox, Physics, usePlane } from '@react-three/cannon';
 import { OrbitControls, Text } from '@react-three/drei';
 import * as THREE from 'three';
@@ -104,7 +104,7 @@ const Dice = ({ position, onResult, shouldRoll, resetRoll }) => {
     });
     
     return unsubscribe;
-  }, [api, isRolling, hasResult, onResult]);
+  }, [api, isRolling, hasResult, onResult, ref]);
 
   return (
     <group>

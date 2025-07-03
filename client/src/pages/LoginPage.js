@@ -173,9 +173,16 @@ const LoginPage = () => {
               </div>
 
               <div className="text-sm">
-                <a href="#" className="font-medium text-primary-600 hover:text-primary-500">
+                <button
+                  type="button"
+                  className="font-medium text-primary-600 hover:text-primary-500 bg-transparent border-none cursor-pointer p-0"
+                  onClick={() => {
+                    // 비밀번호 찾기 기능은 향후 구현 예정
+                    alert('비밀번호 찾기 기능은 준비 중입니다.');
+                  }}
+                >
                   비밀번호를 잊으셨나요?
-                </a>
+                </button>
               </div>
             </div>
 

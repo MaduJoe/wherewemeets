@@ -186,14 +186,14 @@ export const utcToKorean = (utcDateString) => {
   });
 };
 
-export default {
+// 모든 유틸리티 함수들을 객체로 내보내기
+const dateUtils = {
   formatDate,
   formatDateShort,
   formatRelativeTime,
-  formatDateOnly,
-  formatTimeOnly,
-  formatLoginTime,
   formatVoteTime,
-  getCurrentKoreanTime,
-  utcToKorean
-}; 
+  formatLoginTime,
+  getCurrentKoreanTime
+};
+
+export default dateUtils; 
