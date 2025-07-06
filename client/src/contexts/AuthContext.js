@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useState, useEffect } from 'react';
+import React, { createContext, useContext, useState, useEffect, useCallback } from 'react';
 import { toast } from 'react-hot-toast';
 import { 
   createOrRestoreGuestSession, 
@@ -40,46 +40,32 @@ export const AuthProvider = ({ children }) => {
     lastVisit: null
   });
 
-  useEffect(() => {
-    initializeSystem();
-    updateAnalytics();
+  const createGuestSession = useCallback(() => {
+    const session = createOrRestoreGuestSession();
+    setGuestSession(session);
+    
+    const guestUser = {
+      id: session.id,
+      name: session.isRestored ? '게스트 사용자 (복원됨)' : '게스트 사용자',
+      email: '',
+      subscription: 'guest', // 명확한 구분을 위해 'guest'로 설정
+      isGuest: true,
+      sessionExpiresAt: session.expiresAt,
+      createdAt: new Date(session.createdAt).toISOString()
+    };
+    
+    setUser(guestUser);
+    setIsAuthenticated(false);
+    
+    if (session.isRestored) {
+      console.log('게스트 세션 복원:', session.id);
+      toast.success('이전 세션이 복원되었습니다', { duration: 2000 });
+    } else {
+      console.log('새 게스트 세션 생성:', session.id);
+    }
   }, []);
 
-  // 사용자 레벨과 권한 업데이트
-  useEffect(() => {
-    const level = getUserLevel(user, isAuthenticated);
-    const permissions = getUserPermissions(level);
-    
-    setUserLevel(level);
-    setUserPermissions(permissions);
-    
-    console.log('사용자 레벨 업데이트:', level, permissions);
-  }, [user, isAuthenticated]);
-
-  const initializeSystem = async () => {
-    try {
-      setLoading(true);
-      
-      // 시스템 초기화 (만료된 게스트 데이터 정리)
-      initializeGuestSystem();
-      
-      const token = localStorage.getItem('token');
-      if (token) {
-        // 토큰이 있으면 사용자 정보 조회
-        await authenticateWithToken(token);
-      } else {
-        // 토큰이 없으면 게스트 세션 생성
-        createGuestSession();
-      }
-    } catch (error) {
-      console.error('시스템 초기화 에러:', error);
-      createGuestSession();
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const authenticateWithToken = async (token) => {
+  const authenticateWithToken = useCallback(async (token) => {
     try {
       const controller = new AbortController();
       const timeoutId = setTimeout(() => controller.abort(), 5000);
@@ -108,34 +94,32 @@ export const AuthProvider = ({ children }) => {
       localStorage.removeItem('token');
       createGuestSession();
     }
-  };
+  }, [createGuestSession]);
 
-  const createGuestSession = () => {
-    const session = createOrRestoreGuestSession();
-    setGuestSession(session);
-    
-    const guestUser = {
-      id: session.id,
-      name: session.isRestored ? '게스트 사용자 (복원됨)' : '게스트 사용자',
-      email: '',
-      subscription: 'guest', // 명확한 구분을 위해 'guest'로 설정
-      isGuest: true,
-      sessionExpiresAt: session.expiresAt,
-      createdAt: new Date(session.createdAt).toISOString()
-    };
-    
-    setUser(guestUser);
-    setIsAuthenticated(false);
-    
-    if (session.isRestored) {
-      console.log('게스트 세션 복원:', session.id);
-      toast.success('이전 세션이 복원되었습니다', { duration: 2000 });
-    } else {
-      console.log('새 게스트 세션 생성:', session.id);
+  const initializeSystem = useCallback(async () => {
+    try {
+      setLoading(true);
+      
+      // 시스템 초기화 (만료된 게스트 데이터 정리)
+      initializeGuestSystem();
+      
+      const token = localStorage.getItem('token');
+      if (token) {
+        // 토큰이 있으면 사용자 정보 조회
+        await authenticateWithToken(token);
+      } else {
+        // 토큰이 없으면 게스트 세션 생성
+        createGuestSession();
+      }
+    } catch (error) {
+      console.error('시스템 초기화 에러:', error);
+      createGuestSession();
+    } finally {
+      setLoading(false);
     }
-  };
+  }, [authenticateWithToken, createGuestSession]);
 
-  const updateAnalytics = () => {
+  const updateAnalytics = useCallback(() => {
     const stored = localStorage.getItem('userAnalytics');
     if (stored) {
       const analytics = JSON.parse(stored);
@@ -152,7 +136,23 @@ export const AuthProvider = ({ children }) => {
       visitCount: newVisitCount,
       lastVisit: new Date().toISOString()
     }));
-  };
+  }, []);
+
+  useEffect(() => {
+    initializeSystem();
+    updateAnalytics();
+  }, [initializeSystem, updateAnalytics]);
+
+  // 사용자 레벨과 권한 업데이트
+  useEffect(() => {
+    const level = getUserLevel(user, isAuthenticated);
+    const permissions = getUserPermissions(level);
+    
+    setUserLevel(level);
+    setUserPermissions(permissions);
+    
+    console.log('사용자 레벨 업데이트:', level, permissions);
+  }, [user, isAuthenticated]);
 
   const register = async (userData) => {
     try {

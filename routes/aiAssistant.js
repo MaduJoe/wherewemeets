@@ -6,9 +6,267 @@ const { requirePremium } = require('../middleware/subscription');
 const User = require('../models/User');
 const router = express.Router();
 
-const GEMINI_API_KEY = process.env.GEMINI_API_KEY;
+// 여러 개의 Gemini API 키 설정 (환경변수에서 콤마로 구분된 키들을 읽음)
+const GEMINI_API_KEYS = process.env.GEMINI_API_KEY ? 
+  process.env.GEMINI_API_KEY.split(',').map(key => key.trim()).filter(key => key.length > 0) : 
+  [];
+
+
 const GOOGLE_MAPS_API_KEY = process.env.GOOGLE_MAPS_API_KEY;
 const KAKAO_API_KEY = process.env.KAKAO_API_KEY;
+
+// API 키 로테이션 관리
+let apiKeyRotation = {
+  currentIndex: 0,
+  keyUsage: new Map(), // 각 키별 사용량 추적
+  lastResetDate: new Date().toDateString()
+};
+
+// API 키 로테이션 초기화
+function initializeApiKeyRotation() {
+  const today = new Date().toDateString();
+  
+  // 날짜가 바뀌면 모든 키의 사용량 초기화
+  if (apiKeyRotation.lastResetDate !== today) {
+    console.log(`🔄 API 키 사용량 일일 초기화 (${GEMINI_API_KEYS.length}개 키)`);
+    apiKeyRotation.keyUsage.clear();
+    apiKeyRotation.lastResetDate = today;
+    apiKeyRotation.currentIndex = 0;
+  }
+  
+  // 각 키별 사용량 초기화
+  GEMINI_API_KEYS.forEach((key, index) => {
+    if (!apiKeyRotation.keyUsage.has(index)) {
+      apiKeyRotation.keyUsage.set(index, {
+        count: 0,
+        keyPreview: `${key.substring(0, 8)}...`,
+        breakdown: {
+          chat: 0,
+          initial: 0,
+          final: 0,
+          fallback: 0,
+          recommend: 0
+        }
+      });
+    }
+  });
+}
+
+// 현재 사용 가능한 API 키 가져오기
+function getCurrentApiKey() {
+  if (GEMINI_API_KEYS.length === 0) {
+    return null;
+  }
+  
+  initializeApiKeyRotation();
+  
+  // 현재 키가 한도에 도달했는지 확인
+  const currentKeyUsage = apiKeyRotation.keyUsage.get(apiKeyRotation.currentIndex);
+  
+  // 현재 키가 95회 이상 사용되었으면 다음 키로 전환
+  if (currentKeyUsage && currentKeyUsage.count >= 95) {
+    console.log(`⚠️ API 키 ${apiKeyRotation.currentIndex + 1} 한도 도달 (${currentKeyUsage.count}/100), 다음 키로 전환`);
+    
+    // 다음 사용 가능한 키 찾기
+    let nextKeyFound = false;
+    for (let i = 0; i < GEMINI_API_KEYS.length; i++) {
+      const nextIndex = (apiKeyRotation.currentIndex + 1 + i) % GEMINI_API_KEYS.length;
+      const nextKeyUsage = apiKeyRotation.keyUsage.get(nextIndex);
+      
+      if (!nextKeyUsage || nextKeyUsage.count < 95) {
+        apiKeyRotation.currentIndex = nextIndex;
+        nextKeyFound = true;
+        console.log(`✅ API 키 ${nextIndex + 1}로 전환 (사용량: ${nextKeyUsage?.count || 0}/100)`);
+        break;
+      }
+    }
+    
+    if (!nextKeyFound) {
+      console.error('❌ 모든 API 키가 한도에 도달함');
+      return null;
+    }
+  }
+  
+  return GEMINI_API_KEYS[apiKeyRotation.currentIndex];
+}
+
+// API 키별 사용량 추적
+function trackApiKeyUsage(type = 'general') {
+  if (GEMINI_API_KEYS.length === 0) {
+    return false;
+  }
+  
+  initializeApiKeyRotation();
+  
+  const currentUsage = apiKeyRotation.keyUsage.get(apiKeyRotation.currentIndex);
+  if (currentUsage) {
+    currentUsage.count++;
+    if (currentUsage.breakdown[type] !== undefined) {
+      currentUsage.breakdown[type]++;
+    }
+    
+    // 90회 이상 사용 시 경고
+    if (currentUsage.count >= 90) {
+      console.warn(`⚠️ API 키 ${apiKeyRotation.currentIndex + 1} 사용량 경고: ${currentUsage.count}/100`);
+    }
+    
+    return true;
+  }
+  
+  return false;
+}
+
+// API 키 로테이션 상태 정보 가져오기
+function getApiKeyRotationInfo() {
+  if (GEMINI_API_KEYS.length === 0) {
+    return {
+      totalKeys: 0,
+      currentKey: null,
+      allKeysExhausted: true,
+      keyUsages: []
+    };
+  }
+  
+  initializeApiKeyRotation();
+  
+  const keyUsages = [];
+  let availableKeys = 0;
+  
+  for (let i = 0; i < GEMINI_API_KEYS.length; i++) {
+    const usage = apiKeyRotation.keyUsage.get(i);
+    const count = usage?.count || 0;
+    
+    keyUsages.push({
+      index: i + 1,
+      keyPreview: usage?.keyPreview || `${GEMINI_API_KEYS[i].substring(0, 8)}...`,
+      usage: count,
+      remaining: Math.max(0, 100 - count),
+      percentage: Math.round(count / 100 * 100),
+      isActive: i === apiKeyRotation.currentIndex,
+      isAvailable: count < 95,
+      breakdown: usage?.breakdown || {}
+    });
+    
+    if (count < 95) {
+      availableKeys++;
+    }
+  }
+  
+  return {
+    totalKeys: GEMINI_API_KEYS.length,
+    currentKey: apiKeyRotation.currentIndex + 1,
+    availableKeys: availableKeys,
+    allKeysExhausted: availableKeys === 0,
+    keyUsages: keyUsages,
+    totalDailyUsage: keyUsages.reduce((sum, key) => sum + key.usage, 0),
+    maxDailyCapacity: GEMINI_API_KEYS.length * 100
+  };
+}
+
+// API 사용량 추적을 위한 전역 카운터 (호환성을 위해 유지)
+let dailyApiUsage = {
+  count: 0,
+  date: new Date().toDateString(),
+  sessions: new Map(),
+  breakdown: {
+    chat: 0,
+    initial: 0,
+    final: 0,
+    fallback: 0,
+    recommend: 0
+  }
+};
+
+// 기존 trackApiUsage 함수 (API 키 로테이션과 연동)
+function trackApiUsage(type = 'general', sessionId = null) {
+  const today = new Date().toDateString();
+  
+  // 날짜가 바뀌면 카운터 초기화
+  if (dailyApiUsage.date !== today) {
+    dailyApiUsage = {
+      count: 0,
+      date: today,
+      sessions: new Map(),
+      breakdown: {
+        chat: 0,
+        initial: 0,
+        final: 0,
+        fallback: 0,
+        recommend: 0
+      }
+    };
+  }
+  
+  // 전체 카운터 증가
+  dailyApiUsage.count++;
+  if (dailyApiUsage.breakdown[type] !== undefined) {
+    dailyApiUsage.breakdown[type]++;
+  }
+  
+  // 세션별 추적
+  if (sessionId) {
+    if (!dailyApiUsage.sessions.has(sessionId)) {
+      dailyApiUsage.sessions.set(sessionId, 0);
+    }
+    dailyApiUsage.sessions.set(sessionId, dailyApiUsage.sessions.get(sessionId) + 1);
+  }
+  
+  // API 키별 사용량도 추적
+  trackApiKeyUsage(type);
+  
+  // 경고 로그
+  const rotationInfo = getApiKeyRotationInfo();
+  if (rotationInfo.allKeysExhausted) {
+    console.warn(`🚨 모든 API 키 한도 초과: ${rotationInfo.totalDailyUsage}/${rotationInfo.maxDailyCapacity}`);
+  }
+  
+  return dailyApiUsage.count;
+}
+
+// API 사용량 정보 조회 함수 (API 키 로테이션 정보 포함)
+function getApiUsageInfo() {
+  const today = new Date().toDateString();
+  
+  // 날짜가 바뀌면 카운터 초기화
+  if (dailyApiUsage.date !== today) {
+    dailyApiUsage = {
+      count: 0,
+      date: today,
+      sessions: new Map(),
+      breakdown: {
+        chat: 0,
+        initial: 0,
+        final: 0,
+        fallback: 0,
+        recommend: 0
+      }
+    };
+  }
+  
+  // API 키 로테이션 정보 가져오기
+  const rotationInfo = getApiKeyRotationInfo();
+  
+  return {
+    totalToday: dailyApiUsage.count,
+    remaining: Math.max(0, rotationInfo.maxDailyCapacity - rotationInfo.totalDailyUsage),
+    percentage: rotationInfo.maxDailyCapacity > 0 ? 
+      Math.round(rotationInfo.totalDailyUsage / rotationInfo.maxDailyCapacity * 100) : 100,
+    breakdown: dailyApiUsage.breakdown,
+    activeSessions: dailyApiUsage.sessions.size,
+    isNearLimit: rotationInfo.allKeysExhausted || rotationInfo.availableKeys <= 1,
+    
+    // API 키 로테이션 정보 추가
+    apiKeyRotation: {
+      totalKeys: rotationInfo.totalKeys,
+      currentKey: rotationInfo.currentKey,
+      availableKeys: rotationInfo.availableKeys,
+      allKeysExhausted: rotationInfo.allKeysExhausted,
+      totalDailyUsage: rotationInfo.totalDailyUsage,
+      maxDailyCapacity: rotationInfo.maxDailyCapacity,
+      keyUsages: rotationInfo.keyUsages
+    }
+  };
+}
 
 // Function Calling 함수 정의
 const AVAILABLE_FUNCTIONS = {
@@ -39,8 +297,6 @@ const AVAILABLE_FUNCTIONS = {
 
 // AI 응답에서 장소명 파싱하는 함수
 function parseRecommendedPlaces(aiResponse) {
-  console.log('🔍 AI 응답에서 장소명 파싱 중...');
-  
   const places = [];
   const lines = aiResponse.split('\n');
   
@@ -71,33 +327,27 @@ function parseRecommendedPlaces(aiResponse) {
       );
       
       if (isExcluded) {
-        console.log(`❌ 제외된 항목: "${placeName}" (정보성 키워드)`);
         continue;
       }
       
-      // 숫자만 있는 경우 제외 (예: "1", "2", "3" 등)
+      // 숫자만 있는 경우 제외
       if (/^\d+$/.test(placeName)) {
-        console.log(`❌ 제외된 항목: "${placeName}" (숫자만 포함)`);
         continue;
       }
       
       // 너무 짧거나 일반적인 단어들 제외
       const generalWords = ['위치', '시간', '메뉴', '음식', '서비스', '분위기', '추천', '장소'];
       if (generalWords.includes(placeName)) {
-        console.log(`❌ 제외된 항목: "${placeName}" (일반적인 단어)`);
         continue;
       }
       
-      // 장소명으로 보이는 패턴 체크 (상호명, 브랜드명 등)
-      // 적어도 2글자 이상이고, 특수문자나 공백이 포함된 경우 장소명으로 간주
+      // 적어도 2글자 이상인 경우 장소명으로 간주
       if (placeName.length >= 2) {
         places.push(placeName);
-        console.log(`✅ 추가된 장소: "${placeName}"`);
       }
     }
   }
   
-  console.log(`📋 파싱된 장소명들 (${places.length}개):`, places);
   return places;
 }
 
@@ -107,8 +357,6 @@ function mapKakaoCategory(kakaoCategory) {
   
   const fullCategory = kakaoCategory.toLowerCase();
   const lastCategory = kakaoCategory.split(' > ').pop().toLowerCase();
-  
-  console.log('🏷️ 카테고리 매핑 중:', { original: kakaoCategory, full: fullCategory, last: lastCategory });
   
   // 오락시설 관련 (우선 처리)
   if (fullCategory.includes('오락') || fullCategory.includes('레저') || fullCategory.includes('스포츠') ||
@@ -175,11 +423,6 @@ function mapKakaoCategory(kakaoCategory) {
   }
   
   // 기본값 - 음식점으로 분류
-  console.log('🏷️ 기본 카테고리로 분류됨 (restaurant):', {
-    original: kakaoCategory,
-    full: fullCategory,
-    last: lastCategory
-  });
   return 'restaurant';
 }
 
@@ -214,22 +457,16 @@ const LOCATION_CACHE = {
 // 지역명으로 좌표를 구하는 함수
 async function getLocationCoordinates(locationName) {
   try {
-    console.log(`📍 지역 좌표 검색: ${locationName}`);
-    
     // 캐시에서 먼저 확인
     const normalizedName = locationName.trim();
     if (LOCATION_CACHE[normalizedName]) {
-      const coords = LOCATION_CACHE[normalizedName];
-      console.log(`💾 캐시에서 좌표 찾음: ${normalizedName} → (${coords.y}, ${coords.x})`);
-      return coords;
+      return LOCATION_CACHE[normalizedName];
     }
     
     // 역명 변형 체크 (예: "마곡나루" → "마곡나루역")
     const withStation = `${normalizedName}역`;
     if (LOCATION_CACHE[withStation]) {
-      const coords = LOCATION_CACHE[withStation];
-      console.log(`💾 캐시에서 역명으로 좌표 찾음: ${withStation} → (${coords.y}, ${coords.x})`);
-      return coords;
+      return LOCATION_CACHE[withStation];
     }
     
     const response = await axios.get(
@@ -251,7 +488,10 @@ async function getLocationCoordinates(locationName) {
         x: parseFloat(place.x), // 경도
         y: parseFloat(place.y)  // 위도
       };
-      console.log(`✅ 좌표 찾음: ${locationName} → (${coordinates.y}, ${coordinates.x})`);
+      
+      // 캐시에 저장
+      LOCATION_CACHE[normalizedName] = coordinates;
+      
       return coordinates;
     }
     
@@ -276,15 +516,17 @@ async function getLocationCoordinates(locationName) {
         x: parseFloat(place.x),
         y: parseFloat(place.y)
       };
-      console.log(`✅ 키워드로 좌표 찾음: ${locationName} → (${coordinates.y}, ${coordinates.x})`);
+      
+      // 캐시에 저장
+      LOCATION_CACHE[normalizedName] = coordinates;
+      
       return coordinates;
     }
     
-    console.log(`❌ 좌표 찾기 실패: ${locationName}`);
     return null;
     
   } catch (error) {
-    console.error(`❌ 좌표 검색 오류: ${locationName}`, error.message);
+    console.error(`좌표 검색 오류: ${locationName}`, error.message);
     return null;
   }
 }
@@ -292,35 +534,31 @@ async function getLocationCoordinates(locationName) {
 // 특정 장소가 실제로 존재하는지 확인하는 함수 (위치 기반 개선)
 async function verifyPlaceExists(placeName, location) {
   try {
-    console.log(`🔍 장소 존재 확인: ${placeName} in ${location}`);
-    
     if (!KAKAO_API_KEY) {
       return null;
     }
 
-    // 1단계: 지역 좌표 구하기
+    // 지역 좌표 구하기
     const locationCoords = await getLocationCoordinates(location);
     
     let searchParams;
     if (locationCoords) {
-      // 좌표 기반 검색 (더 정확함)
+      // 좌표 기반 검색
       searchParams = {
         query: placeName,
         x: locationCoords.x,
         y: locationCoords.y,
-        radius: 2000, // 2km 반경
-        size: 5, // 여러 결과 중 가장 가까운 것 선택
-        sort: 'distance' // 거리순 정렬
+        radius: 2000,
+        size: 5,
+        sort: 'distance'
       };
-      console.log(`📍 좌표 기반 검색: ${placeName} around (${locationCoords.y}, ${locationCoords.x})`);
     } else {
-      // 폴백: 기존 방식
+      // 폴백: 키워드 검색
       searchParams = {
         query: `${location} ${placeName}`,
         size: 5,
         sort: 'accuracy'
       };
-      console.log(`📝 키워드 기반 검색: ${location} ${placeName}`);
     }
     
     const response = await axios.get(
@@ -337,7 +575,7 @@ async function verifyPlaceExists(placeName, location) {
       // 여러 결과가 있을 때 가장 적절한 장소 선택
       let selectedPlace = response.data.documents[0];
       
-      // 장소명 유사도 체크 (간단한 매칭)
+      // 장소명 유사도 체크
       const targetName = placeName.toLowerCase();
       let bestMatch = null;
       let bestScore = 0;
@@ -345,7 +583,6 @@ async function verifyPlaceExists(placeName, location) {
       for (const place of response.data.documents) {
         const placeLowerName = place.place_name.toLowerCase();
         
-        // 정확한 매칭 우선
         if (placeLowerName.includes(targetName) || targetName.includes(placeLowerName)) {
           const score = targetName.length > 0 ? 
             Math.max(placeLowerName.length - Math.abs(placeLowerName.length - targetName.length), 0) / placeLowerName.length : 0;
@@ -360,27 +597,17 @@ async function verifyPlaceExists(placeName, location) {
       // 더 나은 매치가 있으면 사용
       if (bestMatch && bestScore > 0.3) {
         selectedPlace = bestMatch;
-        console.log(`🎯 더 나은 매치 발견: ${selectedPlace.place_name} (점수: ${bestScore.toFixed(2)})`);
-      }
-      
-      console.log(`✅ 장소 확인됨: ${selectedPlace.place_name} (카테고리: ${selectedPlace.category_name})`);
-      console.log(`📍 위치: ${selectedPlace.address_name}`);
-      
-      // 거리 정보 로깅
-      if (selectedPlace.distance) {
-        console.log(`📏 거리: ${selectedPlace.distance}m`);
       }
       
       // 카카오 카테고리를 표준 카테고리로 매핑
       const mappedCategory = mapKakaoCategory(selectedPlace.category_name);
-      console.log(`🏷️ 카테고리 매핑 결과: ${selectedPlace.category_name} → ${mappedCategory}`);
       
       return {
         id: selectedPlace.id,
         name: selectedPlace.place_name,
         address: selectedPlace.road_address_name || selectedPlace.address_name,
-        category: mappedCategory, // 매핑된 카테고리 사용
-        originalCategory: selectedPlace.category_name, // 원본 카테고리도 보관
+        category: mappedCategory,
+        originalCategory: selectedPlace.category_name,
         coordinates: {
           lat: parseFloat(selectedPlace.y),
           lng: parseFloat(selectedPlace.x)
@@ -393,19 +620,16 @@ async function verifyPlaceExists(placeName, location) {
       };
     }
     
-    console.log(`❌ 장소 확인 실패: ${placeName}`);
     return null;
     
   } catch (error) {
-    console.error(`❌ ${placeName} 검증 중 오류:`, error.message);
+    console.error(`장소 검증 오류: ${placeName}`, error.message);
     return null;
   }
 }
 
 // 사용자 메시지에서 키워드 추출하는 함수
 function extractKeywords(message) {
-  console.log('🔍 사용자 메시지에서 키워드 추출 중...');
-  
   // 지역 추출
   const locationMatch = message.match(/(효창공원역|남영역|여의도|강남|홍대|명동|종로|이태원|압구정|청담|삼성|역삼|논현|학동|신사|가로수길|성수|건대|왕십리|상수|합정|마포|용산|중구|강남구|서초구|종로구|성동구|마포구|영등포구|[가-힣]+역|[가-힣]+구|[가-힣]+동)/);
   
@@ -438,15 +662,11 @@ function extractKeywords(message) {
   
   const location = locationMatch ? locationMatch[1] : '서울';
   
-  console.log(`📋 추출된 키워드: 지역="${location}", 카테고리="${category}"`);
-  
   return { location, category };
 }
 
 // 추천된 장소들을 실제 API로 검증하는 함수
 async function verifyRecommendedPlaces(recommendedPlaces, location) {
-  console.log('🔍 추천 장소들 검증 시작...');
-  
   const verifiedPlaces = [];
   
   // 병렬로 검증 (최대 5개까지만)
@@ -463,39 +683,41 @@ async function verifyRecommendedPlaces(recommendedPlaces, location) {
     }
   }
   
-  console.log(`✅ 검증 완료: ${verifiedPlaces.length}개 장소 확인됨`);
   return verifiedPlaces;
 }
 
 // 키워드 기반 검색 폴백 함수
 async function fallbackKeywordSearch(message, location) {
-  console.log('🔄 키워드 기반 검색 폴백 시작...');
-  
   const { location: extractedLocation, category } = extractKeywords(message);
   
   // 메시지에서 추출한 위치가 더 구체적이면 사용
   const searchLocation = location.includes('서울') && extractedLocation !== '서울' ? extractedLocation : location;
   
-  console.log(`📍 키워드 검색: "${category}" in "${searchLocation}"`);
+  console.log('🔍 키워드 검색 시작:', {
+    message: message,
+    originalLocation: location,
+    extractedLocation: extractedLocation,
+    searchLocation: searchLocation,
+    category: category
+  });
   
   try {
     // 좌표 기반 정확한 지역 검색
     const coordinates = await getLocationCoordinates(searchLocation);
+    console.log('📍 좌표 검색 결과:', coordinates);
     
     if (coordinates) {
-      console.log(`🎯 좌표 기반 검색: ${searchLocation} (${coordinates.lat}, ${coordinates.lng})`);
-      
       // 좌표 기반으로 카카오 API 검색
       const response = await axios.get(
         'https://dapi.kakao.com/v2/local/search/keyword.json',
         {
           params: {
             query: category,
-            x: coordinates.lng,
-            y: coordinates.lat,
-            radius: 2000, // 2km 반경
+            x: coordinates.x,
+            y: coordinates.y,
+            radius: 2000,
             size: 15,
-            sort: 'distance' // 거리순 정렬
+            sort: 'distance'
           },
           headers: {
             'Authorization': `KakaoAK ${KAKAO_API_KEY}`
@@ -505,6 +727,8 @@ async function fallbackKeywordSearch(message, location) {
       );
 
       if (response.data.documents && response.data.documents.length > 0) {
+        console.log('✅ 좌표 기반 검색 성공:', response.data.documents.length, '개 장소 발견');
+        
         const places = response.data.documents.map((place, index) => ({
           id: place.id || `fallback_${index}`,
           name: place.place_name,
@@ -521,9 +745,6 @@ async function fallbackKeywordSearch(message, location) {
           verified: true,
           verificationBadge: '✅ 검증됨'
         }));
-
-        console.log(`✅ 좌표 기반 키워드 검색 성공: ${places.length}개 장소 발견`);
-        console.log('📍 발견된 장소들:', places.slice(0, 3).map(p => `${p.name} (${p.address})`));
         
         return {
           success: true,
@@ -531,15 +752,17 @@ async function fallbackKeywordSearch(message, location) {
           searchQuery: `${searchLocation} ${category}`,
           source: 'coordinate_based_fallback'
         };
+      } else {
+        console.log('❌ 좌표 기반 검색 결과 없음');
       }
     }
     
     // 좌표 기반 검색 실패 시 기존 방식으로 폴백
-    console.log('⚠️ 좌표 기반 검색 실패, 키워드 검색으로 폴백...');
+    console.log('⚠️ 좌표 기반 검색 실패, 기존 방식으로 폴백');
     const searchResult = await searchPlaces(category, searchLocation, 2000);
     
     if (searchResult.status === 'success' && searchResult.places.length > 0) {
-      console.log(`✅ 키워드 검색 성공: ${searchResult.places.length}개 장소 발견`);
+      console.log('✅ 기존 방식 검색 성공:', searchResult.places.length, '개 장소 발견');
       return {
         success: true,
         places: searchResult.places,
@@ -547,11 +770,16 @@ async function fallbackKeywordSearch(message, location) {
         source: 'keyword_fallback'
       };
     } else {
-      console.log('❌ 키워드 검색도 실패');
+      console.log('❌ 기존 방식 검색도 실패:', searchResult);
       return { success: false };
     }
   } catch (error) {
-    console.error('❌ 키워드 검색 오류:', error.message);
+    console.error('키워드 검색 오류:', error.message);
+    console.error('검색 실패 세부 정보:', {
+      location: searchLocation,
+      category: category,
+      error: error.response?.data || error.message
+    });
     return { success: false };
   }
 }
@@ -559,10 +787,7 @@ async function fallbackKeywordSearch(message, location) {
 // Kakao API를 사용한 장소 검색 함수 (기존 호환용)
 async function searchPlaces(query, location, radius = 1000) {
   try {
-    console.log(`🔍 Kakao API 장소 검색: ${query} in ${location} (반경: ${radius}m)`);
-    
     if (!KAKAO_API_KEY) {
-      console.error('❌ KAKAO_API_KEY가 설정되지 않음');
       return {
         status: 'error',
         message: 'Kakao API 키가 설정되지 않았습니다.',
@@ -573,8 +798,6 @@ async function searchPlaces(query, location, radius = 1000) {
 
     // 검색 쿼리 생성
     let searchQuery = `${location} ${query}`;
-    
-    console.log(`📍 Kakao Places API 검색: "${searchQuery}"`);
 
     // Kakao Places API 호출
     const response = await axios.get(
@@ -583,16 +806,14 @@ async function searchPlaces(query, location, radius = 1000) {
         params: {
           query: searchQuery,
           radius: radius,
-          size: 15, // 최대 15개 결과
-          sort: 'accuracy' // 정확도순 정렬
+          size: 15,
+          sort: 'accuracy'
         },
         headers: {
           'Authorization': `KakaoAK ${KAKAO_API_KEY}`
         }
       }
     );
-
-    console.log(`✅ Kakao API 응답: ${response.data.documents.length}개 장소 발견`);
 
     if (!response.data.documents || response.data.documents.length === 0) {
       return {
@@ -620,12 +841,10 @@ async function searchPlaces(query, location, radius = 1000) {
         lng: parseFloat(place.x)
       },
       phone: place.phone || '',
-      rating: 0, // Kakao API는 평점 제공하지 않음
+      rating: 0,
       distance: place.distance ? parseInt(place.distance) : null,
       place_url: place.place_url || ''
     }));
-
-    console.log('🏪 변환된 장소 데이터:', places.map(p => `${p.name} (${p.address})`));
 
     return {
       status: 'success',
@@ -640,8 +859,6 @@ async function searchPlaces(query, location, radius = 1000) {
     console.error('Kakao 장소 검색 오류:', error.response?.data || error.message);
     
     // 검색 실패 시 검색 기반 장소 탭으로 안내
-    console.log('🔄 검색 실패, 검색 기반 장소 서비스로 안내...');
-    
     return {
       status: 'redirect_to_search',
       message: `현재는 검색 기반 장소 서비스만 제공합니다.`,
@@ -658,138 +875,6 @@ async function searchPlaces(query, location, radius = 1000) {
   }
 }
 
-// 키워드 추출 테스트 엔드포인트 (디버깅용)
-router.post('/test-keywords', async (req, res) => {
-  try {
-    const { message } = req.body;
-    
-    console.log('🧪 키워드 추출 테스트:', message);
-    
-    const keywords = extractKeywords(message);
-    
-    // 실제 Kakao 검색도 테스트
-    const searchResult = await searchPlaces(keywords.category, keywords.location, 2000);
-    
-    res.json({
-      success: true,
-      message: message,
-      extractedKeywords: keywords,
-      searchResult: {
-        status: searchResult.status,
-        placesCount: searchResult.places?.length || 0,
-        firstFewPlaces: searchResult.places?.slice(0, 3).map(p => ({
-          name: p.name,
-          address: p.address,
-          category: p.category
-        })) || []
-      }
-    });
-    
-  } catch (error) {
-    console.error('키워드 테스트 에러:', error.message);
-    res.status(500).json({
-      success: false,
-      error: error.message
-    });
-  }
-});
-
-// 환경변수 디버깅용 테스트 엔드포인트
-router.get('/test', (req, res) => {
-  console.log('AI Assistant 테스트 엔드포인트 호출됨');
-  res.json({
-    success: true,
-    message: 'AI Assistant API 정상 작동',
-    environment: {
-      GEMINI_API_KEY: GEMINI_API_KEY ? '설정됨' : '설정안됨',
-      GOOGLE_MAPS_API_KEY: GOOGLE_MAPS_API_KEY ? '설정됨' : '설정안됨',
-      KAKAO_API_KEY: KAKAO_API_KEY ? '설정됨' : '설정안됨',
-      NODE_ENV: process.env.NODE_ENV,
-      CURRENT_MODEL: CURRENT_MODEL,
-      GEMINI_API_URL: GEMINI_API_URL ? '설정됨' : '설정안됨'
-    }
-  });
-});
-
-// 간단한 채팅 테스트 엔드포인트
-router.post('/test-chat', async (req, res) => {
-  try {
-    console.log('🧪 AI 채팅 테스트 시작');
-    
-    if (!GEMINI_API_KEY) {
-      return res.status(500).json({
-        success: false,
-        message: 'GEMINI_API_KEY가 설정되지 않았습니다.'
-      });
-    }
-
-    const response = await axios.post(
-      `${GEMINI_API_URL}?key=${GEMINI_API_KEY}`,
-      {
-        contents: [{
-          parts: [{ text: '안녕하세요!' }]
-        }],
-        generationConfig: {
-          temperature: 0.7,
-          maxOutputTokens: 100
-        }
-      },
-      {
-        headers: { 'Content-Type': 'application/json' },
-        timeout: 10000
-      }
-    );
-
-    const aiResponse = response.data.candidates[0]?.content?.parts[0]?.text || '응답 없음';
-    
-    res.json({
-      success: true,
-      message: 'AI 채팅 테스트 성공',
-      response: aiResponse
-    });
-
-  } catch (error) {
-    console.error('AI 채팅 테스트 에러:', error.response?.data || error.message);
-    res.status(500).json({
-      success: false,
-      message: 'AI 채팅 테스트 실패',
-      error: error.message
-    });
-  }
-});
-
-// Kakao API 테스트 엔드포인트
-router.post('/test-kakao', async (req, res) => {
-  try {
-    console.log('🧪 Kakao API 테스트 시작');
-    
-    if (!KAKAO_API_KEY) {
-      return res.status(500).json({
-        success: false,
-        message: 'KAKAO_API_KEY가 설정되지 않았습니다.'
-      });
-    }
-
-    // 테스트 검색: 효창공원역 카페
-    const testResult = await searchPlaces('카페', '효창공원역', 1000);
-    
-    res.json({
-      success: true,
-      message: 'Kakao API 테스트 완료',
-      testQuery: '효창공원역 카페',
-      result: testResult
-    });
-
-  } catch (error) {
-    console.error('Kakao API 테스트 에러:', error.message);
-    res.status(500).json({
-      success: false,
-      message: 'Kakao API 테스트 실패',
-      error: error.message
-    });
-  }
-});
-
 // 사용 가능한 Gemini 모델들
 const AVAILABLE_MODELS = {
   'flash-latest': 'gemini-1.5-flash-latest',
@@ -800,40 +885,61 @@ const AVAILABLE_MODELS = {
   'pro-001': 'gemini-1.5-pro-001',
   'pro-002': 'gemini-1.5-pro-002',
   '2.5-flash': 'gemini-2.5-flash-preview-05-20',
+  '2.5-flash-lite': 'gemini-2.5-flash-lite-preview-06-17',
   '2.5-pro': 'gemini-2.5-pro-preview-06-05',
-  '2.0-flash': 'gemini-2.0-flash'
+  '2.0-flash': 'gemini-2.0-flash',
+  '2.0-flash-lite': 'gemini-2.0-flash-lite'
 };
 
 // 현재 사용할 모델 (환경변수로 변경 가능)
-// const CURRENT_MODEL = process.env.GEMINI_MODEL || 'flash-001';
+// 안정적인 모델로 변경: 2.5-flash preview는 불안정할 수 있음
 const CURRENT_MODEL = process.env.GEMINI_MODEL || '2.0-flash';
-console.log(AVAILABLE_MODELS[CURRENT_MODEL]);
+console.log(`🤖 사용 중인 모델: ${CURRENT_MODEL} -> ${AVAILABLE_MODELS[CURRENT_MODEL]}`);
 const GEMINI_API_URL = `https://generativelanguage.googleapis.com/v1beta/models/${AVAILABLE_MODELS[CURRENT_MODEL]}:generateContent`; 
 
 // AI 도우미와 채팅 (Gemini API만 사용) - 게스트도 허용
 router.post('/chat', async (req, res) => {
-  console.log('🚀 AI Assistant 요청 받음!');
-  console.log('Request body:', JSON.stringify(req.body, null, 2));
-  console.log('현재 모델:', CURRENT_MODEL, '->', AVAILABLE_MODELS[CURRENT_MODEL]);
-  
   try {
     const { message, context } = req.body;
 
     if (!message) {
-      console.log('❌ 메시지가 없음');
       return res.status(400).json({
         success: false,
         message: '메시지가 필요합니다.'
       });
     }
 
-    // API 키 확인
-    if (!GEMINI_API_KEY) {
-      console.error('❌ GEMINI_API_KEY가 설정되지 않음');
-      return res.status(500).json({
-        success: false,
-        message: 'AI 서비스 설정에 문제가 있습니다.'
-      });
+    // API 키 확인 및 로테이션
+    const currentApiKey = getCurrentApiKey();
+    if (!currentApiKey) {
+      const rotationInfo = getApiKeyRotationInfo();
+      
+      if (rotationInfo.totalKeys === 0) {
+        return res.status(500).json({
+          success: false,
+          message: 'AI 서비스 설정에 문제가 있습니다. API 키가 설정되지 않았습니다.'
+        });
+      } else {
+        return res.status(429).json({
+          success: false,
+          message: '🚦 모든 API 키의 일일 사용량 한도에 도달했습니다.',
+          details: {
+            reason: '모든 API 키 한도 초과',
+            apiKeyRotation: {
+              totalKeys: rotationInfo.totalKeys,
+              totalDailyUsage: rotationInfo.totalDailyUsage,
+              maxDailyCapacity: rotationInfo.maxDailyCapacity,
+              percentage: Math.round(rotationInfo.totalDailyUsage / rotationInfo.maxDailyCapacity * 100)
+            },
+            suggestions: [
+              `${rotationInfo.totalKeys}개 API 키 모두 한도 도달 (${rotationInfo.totalDailyUsage}/${rotationInfo.maxDailyCapacity}회)`,
+              '내일 다시 시도해주세요',
+              '검색 기반 장소 탭을 이용해보세요'
+            ]
+          },
+          fallbackAction: '검색 기반 장소 탭을 이용해보세요.'
+        });
+      }
     }
 
     // 사용자 정보 가져오기 (게스트는 선택사항)
@@ -851,11 +957,11 @@ router.post('/chat', async (req, res) => {
           isGuest = false;
         }
       } catch (error) {
-        console.log('토큰 검증 실패, 게스트로 처리:', error.message);
+        // 토큰 검증 실패 시 게스트로 처리
       }
     }
 
-    // 장소 추천 요청인지 확인 (키워드 기반)
+    // 장소 추천 요청인지 확인
     const isPlaceRecommendation = message.toLowerCase().includes('추천') || 
                                  message.toLowerCase().includes('장소') ||
                                  message.toLowerCase().includes('곳') ||
@@ -871,12 +977,11 @@ router.post('/chat', async (req, res) => {
     // 로그인 사용자의 경우 AI 추천 사용 제한 확인
     if (isPlaceRecommendation && !isGuest && user) {
       const usageStatus = user.canUseAIRecommendation();
-      console.log('AI 추천 사용 상태:', usageStatus);
       
       if (!usageStatus.canUse) {
         return res.status(403).json({
           success: false,
-          message: '무료 사용자는 AI 장소 추천을 5회만 이용할 수 있습니다. 프리미엄으로 업그레이드하여 무제한 이용하세요!',
+          message: '무료 사용자는 AI 장소 추천을 3회만 이용할 수 있습니다. 프리미엄으로 업그레이드하여 무제한 이용하세요!',
           data: {
             usageLimit: true,
             used: usageStatus.used,
@@ -886,6 +991,9 @@ router.post('/chat', async (req, res) => {
         });
       }
     }
+
+    // 세션 ID 정의 (API 사용량 추적용)
+    const sessionId = req.headers['x-session-id'] || req.ip || 'unknown';
 
     console.log('📝 사용자 메시지:', message);
     console.log('📋 컨텍스트:', JSON.stringify(context, null, 2));
@@ -954,12 +1062,15 @@ router.post('/chat', async (req, res) => {
 
       console.log('📤 Gemini API 요청 중...', {
         model: AVAILABLE_MODELS[CURRENT_MODEL],
-        url: `${GEMINI_API_URL}?key=${GEMINI_API_KEY ? 'SET' : 'NOT_SET'}`,
+        apiKeyPreview: `${currentApiKey.substring(0, 8)}...`,
         messageLength: message.length
       });
 
+      // API 사용량 추적 - 초기 요청
+      trackApiUsage('initial', sessionId);
+
       const response = await axios.post(
-        `${GEMINI_API_URL}?key=${GEMINI_API_KEY}`,
+        `${GEMINI_API_URL}?key=${currentApiKey}`,
         requestBody,
         {
           headers: { 'Content-Type': 'application/json' },
@@ -972,8 +1083,12 @@ router.post('/chat', async (req, res) => {
         candidatesCount: response.data.candidates?.length || 0
       });
 
-      console.log('✅ AI 추천 응답 받음');
-      const candidate = response.data.candidates[0];
+      console.log('📥 초기 AI 응답 데이터 수신:', {
+        candidates: response.data.candidates?.length || 0,
+        status: response.status
+      });
+      
+      const candidate = response.data.candidates?.[0];
       
       // AI 응답 텍스트 추출
       if (candidate?.content?.parts) {
@@ -982,6 +1097,10 @@ router.post('/chat', async (req, res) => {
             aiResponse += part.text;
           }
         }
+        console.log('✅ 초기 AI 응답 생성 완료 - 길이:', aiResponse.length);
+      } else {
+        console.error('❌ 초기 AI 응답 파싱 실패:', candidate);
+        aiResponse = '죄송합니다. 장소 추천 응답을 생성하는 중 문제가 발생했습니다.';
       }
 
       if (aiResponse) {
@@ -1030,8 +1149,11 @@ ${verifiedPlacesText}
               }
             };
 
+            // API 사용량 추적 - 최종 응답 생성
+            trackApiUsage('final', sessionId);
+            
             const finalResponse = await axios.post(
-              `${GEMINI_API_URL}?key=${GEMINI_API_KEY}`,
+              `${GEMINI_API_URL}?key=${currentApiKey}`,
               finalRequestBody,
               {
                 headers: { 'Content-Type': 'application/json' },
@@ -1039,8 +1161,13 @@ ${verifiedPlacesText}
               }
             );
 
-                         const finalCandidate = finalResponse.data.candidates[0];
-             aiResponse = ''; // 응답 초기화
+            console.log('📥 최종 응답 데이터 수신:', {
+              candidates: finalResponse.data.candidates?.length || 0,
+              status: finalResponse.status
+            });
+            
+            const finalCandidate = finalResponse.data.candidates?.[0];
+            aiResponse = ''; // 응답 초기화
             
             if (finalCandidate?.content?.parts) {
               for (const part of finalCandidate.content.parts) {
@@ -1048,13 +1175,15 @@ ${verifiedPlacesText}
                   aiResponse += part.text;
                 }
               }
+              console.log('✅ 최종 검증된 응답 생성 완료 - 길이:', aiResponse.length);
+            } else {
+              console.error('❌ 최종 응답 파싱 실패:', finalCandidate);
+              aiResponse = '검증된 장소들을 찾았지만 응답 생성에 실패했습니다.';
             }
-            
-            console.log('✅ 최종 검증된 응답 생성 완료');
           } else {
             console.log('⚠️ 검증된 장소가 없음, 키워드 기반 검색으로 폴백...');
             
-            // 키워드 기반 폴백 검색 시도 (지역 자동 추출)
+            // 키워드 기반 폴백 검색 시도
             const extractedInfo = extractKeywords(message);
             const location = extractedInfo.location || '서울';
             console.log(`🎯 폴백에서 추출된 지역: "${location}"`);
@@ -1092,8 +1221,11 @@ ${fallbackPlacesText}
                 }
               };
 
+              // API 사용량 추적 - 폴백 응답 생성
+              trackApiUsage('fallback', sessionId);
+              
               const fallbackResponse = await axios.post(
-                `${GEMINI_API_URL}?key=${GEMINI_API_KEY}`,
+                `${GEMINI_API_URL}?key=${currentApiKey}`,
                 fallbackRequestBody,
                 {
                   headers: { 'Content-Type': 'application/json' },
@@ -1101,7 +1233,12 @@ ${fallbackPlacesText}
                 }
               );
 
-              const fallbackCandidate = fallbackResponse.data.candidates[0];
+              console.log('📥 폴백 응답 데이터 수신:', {
+                candidates: fallbackResponse.data.candidates?.length || 0,
+                status: fallbackResponse.status
+              });
+              
+              const fallbackCandidate = fallbackResponse.data.candidates?.[0];
               aiResponse = ''; // 응답 초기화
               
               if (fallbackCandidate?.content?.parts) {
@@ -1110,13 +1247,22 @@ ${fallbackPlacesText}
                     aiResponse += part.text;
                   }
                 }
+                console.log('✅ 키워드 폴백 응답 생성 완료 - 길이:', aiResponse.length);
+              } else {
+                console.error('❌ 폴백 응답 파싱 실패:', fallbackCandidate);
+                aiResponse = `"${fallbackResult.searchQuery}" 검색으로 찾은 장소들을 추천드립니다.`;
               }
               
-                             verifiedPlaces = fallbackResult.places.slice(0, 5); // 처음 5개만 사용
-               usedKeywordFallback = true;
-               console.log('✅ 키워드 폴백 응답 생성 완료');
+              verifiedPlaces = fallbackResult.places.slice(0, 5); // 처음 5개만 사용
+              usedKeywordFallback = true;
             } else {
               console.log('❌ 키워드 검색도 실패, 검색 기반 장소로 안내');
+              console.log('검색 실패 원인 분석:', {
+                message: message,
+                extractedLocation: extractedInfo.location,
+                searchLocation: location,
+                category: extractedInfo.category || '추출 실패'
+              });
               return res.json({
                 success: true,
                 data: {
@@ -1137,7 +1283,7 @@ ${fallbackPlacesText}
         } else {
           console.log('⚠️ 파싱된 장소가 없음, 키워드 기반 검색으로 폴백...');
           
-          // AI가 형식을 지키지 않았거나 파싱 실패 시에도 키워드 검색 시도 (지역 자동 추출)
+          // AI가 형식을 지키지 않았거나 파싱 실패 시에도 키워드 검색 시도
           const extractedInfo = extractKeywords(message);
           const location = extractedInfo.location || '서울';
           console.log(`🎯 파싱 실패 폴백에서 추출된 지역: "${location}"`);
@@ -1175,8 +1321,11 @@ ${fallbackPlacesText}
               }
             };
 
+            // API 사용량 추적 - 파싱 실패 후 폴백 응답 생성
+            trackApiUsage('fallback', sessionId);
+            
             const fallbackResponse = await axios.post(
-              `${GEMINI_API_URL}?key=${GEMINI_API_KEY}`,
+              `${GEMINI_API_URL}?key=${currentApiKey}`,
               fallbackRequestBody,
               {
                 headers: { 'Content-Type': 'application/json' },
@@ -1184,7 +1333,12 @@ ${fallbackPlacesText}
               }
             );
 
-            const fallbackCandidate = fallbackResponse.data.candidates[0];
+            console.log('📥 파싱 실패 후 폴백 응답 데이터 수신:', {
+              candidates: fallbackResponse.data.candidates?.length || 0,
+              status: fallbackResponse.status
+            });
+            
+            const fallbackCandidate = fallbackResponse.data.candidates?.[0];
             aiResponse = ''; // 응답 초기화
             
             if (fallbackCandidate?.content?.parts) {
@@ -1193,11 +1347,14 @@ ${fallbackPlacesText}
                   aiResponse += part.text;
                 }
               }
+              console.log('✅ 파싱 실패 후 키워드 폴백 응답 생성 완료 - 길이:', aiResponse.length);
+            } else {
+              console.error('❌ 파싱 실패 후 폴백 응답 파싱 실패:', fallbackCandidate);
+              aiResponse = `"${fallbackResult.searchQuery}" 검색으로 찾은 장소들을 추천드립니다.`;
             }
             
-                         verifiedPlaces = fallbackResult.places.slice(0, 5); // 처음 5개만 사용
-             usedKeywordFallback = true;
-             console.log('✅ 파싱 실패 후 키워드 폴백 응답 생성 완료');
+            verifiedPlaces = fallbackResult.places.slice(0, 5); // 처음 5개만 사용
+            usedKeywordFallback = true;
           } else {
             console.log('⚠️ 파싱 실패 후 키워드 검색도 실패, 원본 AI 응답 사용');
             // 원본 AI 응답을 그대로 사용
@@ -1220,8 +1377,11 @@ ${fallbackPlacesText}
         }
       };
 
+      // API 사용량 추적 - 일반 대화
+      trackApiUsage('chat', sessionId);
+      
       const response = await axios.post(
-        `${GEMINI_API_URL}?key=${GEMINI_API_KEY}`,
+        `${GEMINI_API_URL}?key=${currentApiKey}`,
         requestBody,
         {
           headers: { 'Content-Type': 'application/json' },
@@ -1229,7 +1389,12 @@ ${fallbackPlacesText}
         }
       );
 
-      const candidate = response.data.candidates[0];
+      console.log('📥 일반 대화 응답 데이터 수신:', {
+        candidates: response.data.candidates?.length || 0,
+        status: response.status
+      });
+
+      const candidate = response.data.candidates?.[0];
       
       if (candidate?.content?.parts) {
         for (const part of candidate.content.parts) {
@@ -1237,26 +1402,44 @@ ${fallbackPlacesText}
             aiResponse += part.text;
           }
         }
+        console.log('✅ 일반 대화 응답 생성 완료 - 길이:', aiResponse.length);
+      } else {
+        console.error('❌ 일반 대화 응답 파싱 실패:', candidate);
+        aiResponse = '죄송합니다. 응답을 생성하는 중 문제가 발생했습니다.';
       }
     }
     
     // 최종 응답 처리
     if (!aiResponse) {
-      aiResponse = '죄송합니다. 응답을 생성할 수 없습니다.';
+      console.error('❌ 모든 단계에서 AI 응답 생성 실패');
+      aiResponse = '죄송합니다. 응답을 생성할 수 없습니다. 잠시 후 다시 시도해주세요.';
     }
 
-    console.log('📝 AI 응답:', aiResponse.substring(0, 100) + '...');
+    console.log('📝 최종 AI 응답 길이:', aiResponse.length);
+    console.log('📝 AI 응답 미리보기:', aiResponse.substring(0, 100) + (aiResponse.length > 100 ? '...' : ''));
 
     // 로그인 사용자의 경우 장소 추천 성공 시 사용 횟수 증가
     if (isPlaceRecommendation && aiResponse && aiResponse.length > 0 && !isGuest && user) {
       try {
         await user.incrementAIRecommendationUsage();
         console.log('✅ AI 추천 사용 횟수 증가:', user.analytics.aiRecommendationUsage);
+        
+        // 사용량이 높을 때 경고 로그
+        if (user.analytics.aiRecommendationUsage >= 50) {
+          console.warn('⚠️ 높은 AI 사용량 감지:', {
+            userId: user._id,
+            usage: user.analytics.aiRecommendationUsage,
+            model: AVAILABLE_MODELS[CURRENT_MODEL]
+          });
+        }
       } catch (error) {
         console.error('⚠️ AI 추천 사용 횟수 증가 실패:', error);
       }
     }
 
+    // 응답에 API 사용량 정보 추가
+    const finalApiUsageInfo = getApiUsageInfo();
+    
     res.json({
       success: true,
       data: {
@@ -1266,6 +1449,13 @@ ${fallbackPlacesText}
         usedNewLogic: isPlaceRecommendation,
         usedKeywordFallback: usedKeywordFallback,
         verifiedPlaces: verifiedPlaces.length > 0 ? verifiedPlaces : undefined,
+        apiUsage: process.env.NODE_ENV === 'development' ? {
+          dailyTotal: finalApiUsageInfo.totalToday,
+          remaining: finalApiUsageInfo.remaining,
+          percentage: finalApiUsageInfo.percentage,
+          breakdown: finalApiUsageInfo.breakdown,
+          sessionId: sessionId
+        } : undefined,
         debug: process.env.NODE_ENV === 'development' ? {
           isPlaceRecommendation: isPlaceRecommendation,
           verifiedPlacesCount: verifiedPlaces.length,
@@ -1291,9 +1481,9 @@ ${fallbackPlacesText}
     if (error.response?.status === 400) {
       const errorMessage = error.response.data?.error?.message || 'AI 요청이 올바르지 않습니다.';
       
-      // Gemini 2.0-flash 모델 관련 에러 체크
+      // Gemini 모델 관련 에러 체크
       if (errorMessage.includes('model') || errorMessage.includes('not found')) {
-        console.error('❌ Gemini 모델 에러, flash-001로 폴백 시도');
+        console.error('❌ Gemini 모델 에러 감지:', errorMessage);
         // TODO: 여기서 다른 모델로 재시도할 수 있음
       }
       
@@ -1313,9 +1503,37 @@ ${fallbackPlacesText}
     
     // 429 (Rate Limit) 에러 처리
     if (error.response?.status === 429) {
+      const errorDetails = error.response.data?.error || {};
+      const retryAfter = error.response.headers?.['retry-after'] || 60;
+      
+      console.error('❌ Gemini API Rate Limit 초과:', {
+        model: AVAILABLE_MODELS[CURRENT_MODEL],
+        errorDetails,
+        retryAfter
+      });
+      
+      const apiUsageInfo = getApiUsageInfo();
+      
       return res.status(429).json({
         success: false,
-        message: 'AI API 사용량 한도를 초과했습니다. 잠시 후 다시 시도해주세요.'
+        message: '🚦 AI API 사용량 한도를 초과했습니다.',
+        details: {
+          reason: 'API Rate Limit 초과',
+          retryAfter: parseInt(retryAfter),
+          currentModel: AVAILABLE_MODELS[CURRENT_MODEL],
+          apiUsage: {
+            dailyTotal: apiUsageInfo.totalToday,
+            percentage: apiUsageInfo.percentage,
+            breakdown: apiUsageInfo.breakdown
+          },
+          suggestions: [
+            `오늘 ${apiUsageInfo.totalToday}/100회 사용 (${apiUsageInfo.percentage}%)`,
+            '1-2분 후 다시 시도해주세요',
+            '검색 기반 장소 탭을 이용해보세요',
+            '프리미엄 업그레이드 시 더 높은 한도를 이용할 수 있습니다'
+          ]
+        },
+        fallbackAction: '검색 기반 장소 탭을 이용해보세요.'
       });
     }
 
@@ -1385,7 +1603,40 @@ router.post('/recommend-places', async (req, res) => {
       });
     }
 
-        // 사용자 정보 가져오기 (게스트는 선택사항)
+    // API 키 확인 및 로테이션
+    const currentApiKey = getCurrentApiKey();
+    if (!currentApiKey) {
+      const rotationInfo = getApiKeyRotationInfo();
+      
+      if (rotationInfo.totalKeys === 0) {
+        return res.status(500).json({
+          success: false,
+          message: 'AI 서비스 설정에 문제가 있습니다. API 키가 설정되지 않았습니다.'
+        });
+      } else {
+        return res.status(429).json({
+          success: false,
+          message: '🚦 모든 API 키의 일일 사용량 한도에 도달했습니다.',
+          details: {
+            reason: '모든 API 키 한도 초과',
+            apiKeyRotation: {
+              totalKeys: rotationInfo.totalKeys,
+              totalDailyUsage: rotationInfo.totalDailyUsage,
+              maxDailyCapacity: rotationInfo.maxDailyCapacity,
+              percentage: Math.round(rotationInfo.totalDailyUsage / rotationInfo.maxDailyCapacity * 100)
+            },
+            suggestions: [
+              `${rotationInfo.totalKeys}개 API 키 모두 한도 도달 (${rotationInfo.totalDailyUsage}/${rotationInfo.maxDailyCapacity}회)`,
+              '내일 다시 시도해주세요',
+              '검색 기반 장소 탭을 이용해보세요'
+            ]
+          },
+          fallbackAction: '검색 기반 장소 탭을 이용해보세요.'
+        });
+      }
+    }
+
+    // 사용자 정보 가져오기 (게스트는 선택사항)
     let user = null;
     let isGuest = true;
     
@@ -1412,7 +1663,7 @@ router.post('/recommend-places', async (req, res) => {
       if (!usageStatus.canUse) {
         return res.status(403).json({
           success: false,
-          message: '무료 사용자는 AI 장소 추천을 5회만 이용할 수 있습니다. 프리미엄으로 업그레이드하여 무제한 이용하세요!',
+          message: '무료 사용자는 AI 장소 추천을 3회만 이용할 수 있습니다. 프리미엄으로 업그레이드하여 무제한 이용하세요!',
           data: {
             usageLimit: true,
             used: usageStatus.used,
@@ -1438,13 +1689,11 @@ router.post('/recommend-places', async (req, res) => {
 
 중요 규칙:
 - 장소를 추천할 때는 반드시 search_places 함수를 사용해 실제 존재하는 장소를 검색해야 합니다
-- 검색 결과가 제한적이거나 오류가 발생한 경우, 친근하고 도움이 되는 일반적인 조언을 제공하세요
 - 사용자가 실망하지 않도록 긍정적이고 유용한 정보를 항상 제공하세요
 - 사용자가 지역을 명시하지 않으면 "서울"을 기본값으로 사용하세요
 
 역할과 목표:
 - 실제 검색된 장소 데이터를 바탕으로 신뢰할 수 있는 추천을 제공합니다
-- 검색이 어려운 상황에서도 해당 지역에 대한 유용한 가이드를 제공합니다
 - 한국어로 친근하고 전문적으로 답변합니다`;
 
     // Function Calling을 통한 AI 요청
@@ -1463,9 +1712,13 @@ router.post('/recommend-places', async (req, res) => {
       }
     };
 
-    console.log('📤 AI 요청 전송 중...');
+    console.log('📤 AI 요청 전송 중... (API 키:', `${currentApiKey.substring(0, 8)}...)`);
+    // API 사용량 추적 - 장소 추천
+    const sessionId = req.headers['x-session-id'] || req.ip || 'unknown';
+    trackApiUsage('recommend', sessionId);
+    
     let response = await axios.post(
-      `${GEMINI_API_URL}?key=${GEMINI_API_KEY}`,
+      `${GEMINI_API_URL}?key=${currentApiKey}`,
       requestBody,
       {
         headers: { 'Content-Type': 'application/json' },
@@ -1544,8 +1797,11 @@ router.post('/recommend-places', async (req, res) => {
         }
       };
 
+      // API 사용량 추적 - Function Call 후 추가 요청
+      trackApiUsage('recommend', sessionId);
+      
       response = await axios.post(
-        `${GEMINI_API_URL}?key=${GEMINI_API_KEY}`,
+        `${GEMINI_API_URL}?key=${currentApiKey}`,
         requestBody,
         {
           headers: { 'Content-Type': 'application/json' }
@@ -1624,9 +1880,37 @@ router.post('/recommend-places', async (req, res) => {
     
     // 429 (Rate Limit) 에러 처리
     if (error.response?.status === 429) {
+      const errorDetails = error.response.data?.error || {};
+      const retryAfter = error.response.headers?.['retry-after'] || 60;
+      
+      console.error('❌ AI 장소 추천 - Rate Limit 초과:', {
+        model: AVAILABLE_MODELS[CURRENT_MODEL],
+        errorDetails,
+        retryAfter
+      });
+      
+      const apiUsageInfo = getApiUsageInfo();
+      
       return res.status(429).json({
         success: false,
-        message: '⚠️ AI API 사용량 한도를 초과했습니다. 잠시 후 다시 시도해주세요.'
+        message: '🚦 AI API 사용량 한도를 초과했습니다.',
+        details: {
+          reason: 'API Rate Limit 초과',
+          retryAfter: parseInt(retryAfter),
+          currentModel: AVAILABLE_MODELS[CURRENT_MODEL],
+          apiUsage: {
+            dailyTotal: apiUsageInfo.totalToday,
+            percentage: apiUsageInfo.percentage,
+            breakdown: apiUsageInfo.breakdown
+          },
+          suggestions: [
+            `오늘 ${apiUsageInfo.totalToday}/100회 사용 (${apiUsageInfo.percentage}%)`,
+            '1-2분 후 다시 시도해주세요',
+            '검색 기반 장소 탭을 이용해보세요',
+            '프리미엄 업그레이드 시 더 높은 한도를 이용할 수 있습니다'
+          ]
+        },
+        fallbackAction: '검색 기반 장소 탭을 이용해보세요.'
       });
     }
     
@@ -1638,59 +1922,7 @@ router.post('/recommend-places', async (req, res) => {
   }
 });
 
-// 모델 테스트 엔드포인트
-router.post('/test-model', auth, requirePremium, async (req, res) => {
-  try {
-    const { modelKey } = req.body;
-    
-    if (!modelKey || !AVAILABLE_MODELS[modelKey]) {
-      return res.status(400).json({
-        success: false,
-        message: '유효하지 않은 모델입니다.',
-        availableModels: Object.keys(AVAILABLE_MODELS)
-      });
-    }
 
-    const testUrl = `https://generativelanguage.googleapis.com/v1beta/models/${AVAILABLE_MODELS[modelKey]}:generateContent`;
-
-    const response = await axios.post(
-      `${testUrl}?key=${GEMINI_API_KEY}`,
-      {
-        contents: [{
-          parts: [{
-            text: '안녕하세요! 간단한 테스트 메시지입니다.'
-          }]
-        }],
-        generationConfig: {
-          temperature: 0.7,
-          maxOutputTokens: 100
-        }
-      },
-      {
-        headers: {
-          'Content-Type': 'application/json'
-        },
-        timeout: 10000
-      }
-    );
-
-    res.json({
-      success: true,
-      message: `${AVAILABLE_MODELS[modelKey]} 모델이 정상 작동합니다.`,
-      modelResponse: response.data.candidates[0]?.content?.parts[0]?.text || 'No response'
-    });
-
-  } catch (error) {
-    console.error(`모델 테스트 실패 (${modelKey}):`, error.response?.data || error.message);
-    
-    res.json({
-      success: false,
-      message: `${modelKey} 모델 테스트 실패`,
-      error: error.response?.data || error.message,
-      statusCode: error.response?.status
-    });
-  }
-});
 
 // 장소 검증 API 엔드포인트
 router.post('/verify-places', async (req, res) => {
@@ -1749,6 +1981,234 @@ router.post('/verify-places', async (req, res) => {
       success: false,
       message: '장소 검증 중 오류가 발생했습니다.',
       error: process.env.NODE_ENV === 'development' ? error.message : undefined
+    });
+  }
+});
+
+// 사용량 상태 확인 엔드포인트
+router.get('/usage-status', auth, async (req, res) => {
+  try {
+    const user = await User.findById(req.user.id);
+    
+    if (!user) {
+      return res.status(404).json({
+        success: false,
+        message: '사용자를 찾을 수 없습니다.'
+      });
+    }
+    
+    const usageStatus = user.canUseAIRecommendation();
+    
+    // API 사용량 정보 추가
+    const apiUsageInfo = getApiUsageInfo();
+    
+    res.json({
+      success: true,
+      data: {
+        usage: user.analytics.aiRecommendationUsage,
+        limit: usageStatus.limit,
+        remaining: usageStatus.remaining,
+        canUse: usageStatus.canUse,
+        isPremium: user.subscription.plan !== 'free',
+        currentModel: AVAILABLE_MODELS[CURRENT_MODEL],
+        apiUsage: {
+          dailyTotal: apiUsageInfo.totalToday,
+          dailyRemaining: apiUsageInfo.remaining,
+          percentage: apiUsageInfo.percentage,
+          breakdown: apiUsageInfo.breakdown,
+          activeSessions: apiUsageInfo.activeSessions,
+          isNearLimit: apiUsageInfo.isNearLimit
+        },
+        suggestions: user.analytics.aiRecommendationUsage >= 50 || apiUsageInfo.isNearLimit ? [
+          ...(user.analytics.aiRecommendationUsage >= 50 ? ['사용자 한도가 높습니다'] : []),
+          ...(apiUsageInfo.isNearLimit ? ['일일 API 한도에 근접했습니다'] : []),
+          '1-2분 간격으로 요청해주세요',
+          '검색 기반 장소 탭을 활용해보세요'
+        ] : []
+      }
+    });
+    
+  } catch (error) {
+    console.error('사용량 상태 확인 오류:', error);
+    res.status(500).json({
+      success: false,
+      message: '사용량 상태 확인 중 오류가 발생했습니다.'
+    });
+  }
+});
+
+// API 사용량 전용 조회 엔드포인트 (인증 불필요)
+router.get('/api-usage', (req, res) => {
+  try {
+    const apiUsageInfo = getApiUsageInfo();
+    
+    res.json({
+      success: true,
+      data: {
+        date: new Date().toDateString(),
+        dailyTotal: apiUsageInfo.totalToday,
+        dailyRemaining: apiUsageInfo.remaining,
+        dailyLimit: apiUsageInfo.apiKeyRotation.maxDailyCapacity,
+        percentage: apiUsageInfo.percentage,
+        breakdown: apiUsageInfo.breakdown,
+        activeSessions: apiUsageInfo.activeSessions,
+        isNearLimit: apiUsageInfo.isNearLimit,
+        currentModel: AVAILABLE_MODELS[CURRENT_MODEL],
+        
+        // API 키 로테이션 정보
+        apiKeyRotation: apiUsageInfo.apiKeyRotation,
+        
+        warnings: apiUsageInfo.isNearLimit || apiUsageInfo.apiKeyRotation.allKeysExhausted ? [
+          ...(apiUsageInfo.apiKeyRotation.allKeysExhausted ? ['모든 API 키가 한도를 초과했습니다'] : []),
+          ...(apiUsageInfo.isNearLimit ? ['사용 가능한 API 키가 부족합니다'] : []),
+          '요청 간격을 늘려주세요',
+          '검색 기반 장소 탭을 활용해보세요'
+        ] : [],
+        
+        status: apiUsageInfo.percentage >= 100 ? 'exceeded' : 
+                apiUsageInfo.percentage >= 80 ? 'warning' : 'normal'
+      }
+    });
+    
+  } catch (error) {
+    console.error('API 사용량 조회 오류:', error);
+    res.status(500).json({
+      success: false,
+      message: 'API 사용량 조회 중 오류가 발생했습니다.'
+    });
+  }
+});
+
+// 개발환경 전용: 사용량 초기화 엔드포인트
+router.post('/reset-usage', auth, async (req, res) => {
+  try {
+    // 개발 환경에서만 허용
+    if (process.env.NODE_ENV !== 'development') {
+      return res.status(403).json({
+        success: false,
+        message: '이 기능은 개발 환경에서만 사용할 수 있습니다.'
+      });
+    }
+    
+    const user = await User.findById(req.user.id);
+    
+    if (!user) {
+      return res.status(404).json({
+        success: false,
+        message: '사용자를 찾을 수 없습니다.'
+      });
+    }
+    
+    const oldUsage = user.analytics.aiRecommendationUsage;
+    
+    // 사용량 초기화
+    user.analytics.aiRecommendationUsage = 0;
+    user.analytics.lastAIRecommendationDate = new Date();
+    await user.save();
+    
+    console.log(`🔄 사용량 초기화: ${oldUsage} → 0 (사용자: ${user.email})`);
+    
+    res.json({
+      success: true,
+      message: '사용량이 초기화되었습니다.',
+      data: {
+        oldUsage,
+        newUsage: 0,
+        canUse: true
+      }
+    });
+    
+  } catch (error) {
+    console.error('사용량 초기화 오류:', error);
+    res.status(500).json({
+      success: false,
+      message: '사용량 초기화 중 오류가 발생했습니다.'
+    });
+  }
+});
+
+// 개발환경 전용: API 사용량 카운터 초기화 엔드포인트
+router.post('/reset-api-usage', async (req, res) => {
+  try {
+    // 개발 환경에서만 허용
+    if (process.env.NODE_ENV !== 'development') {
+      return res.status(403).json({
+        success: false,
+        message: '이 기능은 개발 환경에서만 사용할 수 있습니다.'
+      });
+    }
+    
+    const oldUsage = { ...dailyApiUsage };
+    
+    // API 사용량 카운터 초기화
+    dailyApiUsage = {
+      count: 0,
+      date: new Date().toDateString(),
+      sessions: new Map(),
+      breakdown: {
+        chat: 0,
+        initial: 0,
+        final: 0,
+        fallback: 0,
+        recommend: 0
+      }
+    };
+    
+    console.log(`🔄 API 사용량 카운터 초기화: ${oldUsage.count} → 0`);
+    
+    res.json({
+      success: true,
+      message: 'API 사용량 카운터가 초기화되었습니다.',
+      data: {
+        oldUsage: {
+          count: oldUsage.count,
+          breakdown: oldUsage.breakdown
+        },
+        newUsage: {
+          count: 0,
+          breakdown: dailyApiUsage.breakdown
+        }
+      }
+    });
+    
+  } catch (error) {
+    console.error('API 사용량 초기화 오류:', error);
+    res.status(500).json({
+      success: false,
+      message: 'API 사용량 초기화 중 오류가 발생했습니다.'
+    });
+  }
+});
+
+// API 키 로테이션 상태 확인 엔드포인트
+router.get('/api-key-status', (req, res) => {
+  try {
+    const rotationInfo = getApiKeyRotationInfo();
+    
+    res.json({
+      success: true,
+      data: {
+        ...rotationInfo,
+        status: rotationInfo.allKeysExhausted ? 'all_exhausted' : 
+                rotationInfo.availableKeys <= 1 ? 'critical' : 
+                rotationInfo.availableKeys <= Math.ceil(rotationInfo.totalKeys * 0.3) ? 'warning' : 'normal',
+        recommendations: rotationInfo.allKeysExhausted ? [
+          '모든 API 키가 한도에 도달했습니다',
+          '내일 다시 시도해주세요',
+          '추가 API 키 발급을 고려해보세요'
+        ] : rotationInfo.availableKeys <= 1 ? [
+          '마지막 사용 가능한 API 키입니다',
+          '추가 API 키 준비를 권장합니다',
+          '사용량을 제한하여 키를 보존하세요'
+        ] : []
+      }
+    });
+    
+  } catch (error) {
+    console.error('API 키 상태 조회 오류:', error);
+    res.status(500).json({
+      success: false,
+      message: 'API 키 상태 조회 중 오류가 발생했습니다.'
     });
   }
 });

@@ -74,10 +74,47 @@ MONGODB_URI=mongodb+srv://...
 JWT_SECRET=your-jwt-secret
 KAKAO_API_KEY=your-kakao-key
 GOOGLE_PLACES_API_KEY=your-google-places-key
+
+# Gemini API 키 로테이션 시스템
+# 단일 키: GEMINI_API_KEY=your-gemini-key
+# 여러 키: GEMINI_API_KEY=key1,key2,key3,key4
 GEMINI_API_KEY=your-gemini-key
+
 NODE_ENV=production
 PORT=3000
 ```
+
+### 🔄 API 키 로테이션 시스템
+
+Gemini API는 무료 tier에서 하루 100회 요청 제한이 있습니다. 이를 해결하기 위해 여러 개의 API 키를 사용한 로테이션 시스템을 구현했습니다.
+
+#### 설정 방법
+1. Google AI Studio에서 여러 계정으로 API 키를 발급받으세요
+2. 환경변수에 콤마로 구분하여 여러 키를 입력하세요:
+   ```env
+   GEMINI_API_KEY=AIzaSyABC123...,AIzaSyDEF456...,AIzaSyGHI789...
+   ```
+
+#### 작동 원리
+- 각 API 키별로 사용량을 개별 추적
+- 한 키가 95회 도달 시 자동으로 다음 키로 전환
+- 모든 키가 한도에 도달하면 다음 날까지 대기
+- 일일 초기화로 매일 자동 재설정
+
+#### 모니터링
+```bash
+# API 키 상태 확인
+GET /api/aiAssistant/api-key-status
+
+# 사용량 상세 정보
+GET /api/aiAssistant/api-usage
+```
+
+#### 장점
+- **무중단 서비스**: API 한도 초과 시에도 서비스 지속
+- **확장성**: 키 추가로 용량 확장 가능 (예: 4개 키 = 400회/일)
+- **비용 효율성**: 무료 tier 최대 활용
+- **자동 관리**: 수동 개입 없이 자동 로테이션
 
 ## 📱 주요 페이지
 

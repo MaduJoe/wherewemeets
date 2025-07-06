@@ -8,7 +8,7 @@ const API_BASE_URL = window.location.hostname === 'localhost'
 // Axios 인스턴스 생성
 const api = axios.create({
   baseURL: `${API_BASE_URL}/api`,
-  timeout: 10000,
+  timeout: 15000, // 15초로 증가 (투표 요청 안정성 향상)
   withCredentials: true,
   headers: {
     'Content-Type': 'application/json',

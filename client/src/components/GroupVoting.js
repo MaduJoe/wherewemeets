@@ -1,6 +1,6 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useCallback } from 'react';
+import PropTypes from 'prop-types';
 import api from '../utils/api';
-import { formatVoteTime } from '../utils/dateUtils';
 import { 
   HandThumbUpIcon,
   ChatBubbleLeftRightIcon,
@@ -9,7 +9,6 @@ import {
   XMarkIcon,
   ShareIcon,
   TrashIcon,
-  StarIcon,
   TrophyIcon
 } from '@heroicons/react/24/outline';
 import { useAuth } from '../contexts/AuthContext';
@@ -35,8 +34,10 @@ class VoteService {
         placeId,
         participant
       });
+      
       return response.data.data;
     } catch (error) {
+      // 에러 로그는 디버깅을 위해 유지
       console.error('투표 실패:', error);
       throw error;
     }
@@ -98,11 +99,7 @@ const voteService = new VoteService();
 
 // 미팅 히스토리 저장 함수
 const saveMeetingHistory = async (user, meetingData) => {
-  console.log('🔍 히스토리 저장 시작 - 사용자:', user);
-  console.log('🔍 히스토리 저장 시작 - 미팅 데이터:', meetingData);
-  
   if (!user?.id || user.isGuest) {
-    console.log('❌ 히스토리 저장 중단 - 게스트 사용자이거나 사용자 ID가 없음');
     return;
   }
   
@@ -127,22 +124,15 @@ const saveMeetingHistory = async (user, meetingData) => {
       meetingStatus: 'completed'
     };
     
-    console.log('📝 저장할 히스토리 데이터:', historyData);
-    console.log('🌐 API 호출 URL:', `/users/${user.id}/history`);
-    
     const response = await api.post(`/users/${user.id}/history`, historyData);
-    
-    console.log('✅ 미팅 히스토리 저장 성공:', response.data);
     return response.data;
   } catch (error) {
-    console.error('❌ 미팅 히스토리 저장 실패:', error);
-    console.error('❌ 에러 응답:', error.response?.data);
-    console.error('❌ 에러 상태:', error.response?.status);
+    console.error('미팅 히스토리 저장 실패:', error);
     throw error;
   }
 };
 
-const GroupVoting = ({ meetingId, currentUserId = 1, candidatePlaces, onTabChange }) => {
+const GroupVoting = ({ meetingId, candidatePlaces, onTabChange }) => {
   const { user } = useAuth();
   const [meeting, setMeeting] = useState(null);
   const [loading, setLoading] = useState(false);
@@ -174,52 +164,8 @@ const GroupVoting = ({ meetingId, currentUserId = 1, candidatePlaces, onTabChang
     { value: 'shopping', label: '쇼핑', icon: '🛍️' }
   ];
 
-  // meetingId가 있지만 meeting 객체가 없을 때 기본 meeting 객체 생성
-  useEffect(() => {
-    if (meetingId && !meeting) {
-      setMeeting({
-        id: meetingId,
-        candidatePlaces: candidatePlaces || []
-      });
-    }
-  }, [meetingId, meeting, candidatePlaces]);
-
-  // 참가자 및 투표 데이터 초기화
-  useEffect(() => {
-    if (!meetingId) return;
-
-    // 현재 참가자 정보 확인
-    const savedParticipant = localStorage.getItem(`meeting_${meetingId}_participant`);
-    
-    if (savedParticipant) {
-      setCurrentParticipant(JSON.parse(savedParticipant));
-    } else {
-      setShowNameModal(true);
-    }
-
-    // 서버에서 투표 데이터 로드
-    loadVoteData();
-  }, [meetingId]);
-
-  // ESC 키 이벤트 리스너 추가
-  useEffect(() => {
-    const handleEscapeKey = (event) => {
-      if (event.key === 'Escape' && showNameModal) {
-        setShowNameModal(false);
-      }
-    };
-
-    if (showNameModal) {
-      document.addEventListener('keydown', handleEscapeKey);
-    }
-
-    return () => {
-      document.removeEventListener('keydown', handleEscapeKey);
-    };
-  }, [showNameModal]);
-
   // 서버에서 투표 데이터 로드
-  const loadVoteData = async () => {
+  const loadVoteData = useCallback(async () => {
     if (!meetingId) return;
     
     try {
@@ -251,19 +197,114 @@ const GroupVoting = ({ meetingId, currentUserId = 1, candidatePlaces, onTabChang
       }
     } catch (error) {
       console.error('투표 데이터 로드 실패:', error);
+      
+      if (error.response?.status === 503) {
+        alert('데이터베이스 연결이 불안정합니다. 잠시 후 다시 시도해주세요.');
+      } else if (error.code === 'ECONNABORTED') {
+        alert('네트워크 연결이 느려 데이터 로드가 실패했습니다. 페이지를 새로고침해주세요.');
+      } else if (!error.response) {
+        alert('네트워크 연결을 확인해주세요.');
+      }
     }
-  };
+  }, [meetingId]);
+
+  // 서버에서 채팅 메시지 로드
+  const loadChatMessages = useCallback(async () => {
+    if (!meetingId) return;
+    
+    try {
+      const response = await api.get(`/chat/${meetingId}`);
+      if (response.data.success && response.data.data.messages) {
+        // 메시지 데이터 검증 및 정리
+        const validMessages = response.data.data.messages.filter(msg => {
+          // 필수 필드 검증
+          if (!msg.userName || !msg.message) {
+            return false;
+          }
+          
+          // 날짜 필드 정리 (timestamp 또는 createdAt)
+          if (!msg.timestamp && msg.createdAt) {
+            msg.timestamp = msg.createdAt;
+          }
+          
+          return true;
+        });
+        
+        setChatMessages(validMessages);
+      }
+    } catch (error) {
+      console.error('채팅 메시지 로드 실패:', error);
+      setChatMessages([]);
+    }
+  }, [meetingId]);
+
+  const loadMeeting = useCallback(async () => {
+    try {
+      const response = await api.get(`/meetings/${meetingId}`);
+      setMeeting(response.data);
+      
+      // 감정 반응 관련 코드 제거
+    } catch (error) {
+      console.error('미팅 정보 로드 실패:', error);
+    }
+  }, [meetingId]);
+
+  // meetingId가 있지만 meeting 객체가 없을 때 기본 meeting 객체 생성
+  useEffect(() => {
+    if (meetingId && !meeting) {
+      setMeeting({
+        id: meetingId,
+        candidatePlaces: candidatePlaces || []
+      });
+    }
+  }, [meetingId, meeting, candidatePlaces]);
+
+  // 참가자 및 투표 데이터 초기화
+  useEffect(() => {
+    if (!meetingId) return;
+
+    // 현재 참가자 정보 확인
+    const savedParticipant = localStorage.getItem(`meeting_${meetingId}_participant`);
+    
+    if (savedParticipant) {
+      setCurrentParticipant(JSON.parse(savedParticipant));
+    } else {
+      setShowNameModal(true);
+    }
+
+    // 서버에서 투표 데이터 로드
+    loadVoteData();
+  }, [meetingId, loadVoteData]);
+
+  // ESC 키 이벤트 리스너 추가
+  useEffect(() => {
+    const handleEscapeKey = (event) => {
+      if (event.key === 'Escape' && showNameModal) {
+        setShowNameModal(false);
+      }
+    };
+
+    if (showNameModal) {
+      document.addEventListener('keydown', handleEscapeKey);
+    }
+
+    return () => {
+      document.removeEventListener('keydown', handleEscapeKey);
+    };
+  }, [showNameModal]);
 
   // 실시간 투표 데이터 업데이트 (폴링)
   useEffect(() => {
     if (!meetingId) return;
 
-    const interval = setInterval(() => {
+    const updateInterval = setInterval(() => {
       loadVoteData();
     }, 3000); // 3초마다 업데이트
 
-    return () => clearInterval(interval);
-  }, [meetingId]);
+    return () => {
+      clearInterval(updateInterval);
+    };
+  }, [meetingId, loadVoteData]);
 
   // 실시간 채팅 메시지 업데이트 (폴링)
   useEffect(() => {
@@ -274,7 +315,7 @@ const GroupVoting = ({ meetingId, currentUserId = 1, candidatePlaces, onTabChang
     }, 2000); // 2초마다 채팅 메시지 업데이트
 
     return () => clearInterval(chatInterval);
-  }, [meetingId]);
+  }, [meetingId, loadChatMessages]);
 
   // 투표 데이터와 meeting 상태를 동기화
   useEffect(() => {
@@ -303,15 +344,11 @@ const GroupVoting = ({ meetingId, currentUserId = 1, candidatePlaces, onTabChang
       if (isNameChange) {
         // 기존 참가자의 이름 변경
         try {
-          console.log('이름 변경 시작:', currentParticipant.name, '→', participantName.trim());
-          
           const result = await voteService.updateParticipantName(
             meetingId, 
             currentParticipant.id, 
             participantName.trim()
           );
-          
-          console.log('이름 변경 성공:', result);
           
           // 성공 시에만 상태 업데이트
           const updatedParticipant = {
@@ -340,10 +377,7 @@ const GroupVoting = ({ meetingId, currentUserId = 1, candidatePlaces, onTabChang
         };
 
         try {
-          console.log('참가자 등록 시작:', newParticipant);
-          
           const result = await voteService.addParticipant(meetingId, newParticipant);
-          console.log('참가자 등록 성공:', result);
           
           setCurrentParticipant(newParticipant);
           localStorage.setItem(`meeting_${meetingId}_participant`, JSON.stringify(newParticipant));
@@ -377,44 +411,13 @@ const GroupVoting = ({ meetingId, currentUserId = 1, candidatePlaces, onTabChang
         title: '투표에 참여해주세요!',
         text: '장소 투표에 참여해서 의견을 나눠주세요.',
         url: shareUrl
-      }).catch(console.error);
+      }).catch(() => {});
     } else {
       navigator.clipboard.writeText(shareUrl).then(() => {
         alert('공유 링크가 클립보드에 복사되었습니다!');
       }).catch(() => {
         alert(`링크를 복사해주세요: ${shareUrl}`);
       });
-    }
-  };
-
-  // 서버에서 채팅 메시지 로드
-  const loadChatMessages = async () => {
-    if (!meetingId) return;
-    
-    try {
-      const response = await api.get(`/chat/${meetingId}`);
-      if (response.data.success && response.data.data.messages) {
-        // 메시지 데이터 검증 및 정리
-        const validMessages = response.data.data.messages.filter(msg => {
-          // 필수 필드 검증
-          if (!msg.userName || !msg.message) {
-            console.warn('Invalid message format:', msg);
-            return false;
-          }
-          
-          // 날짜 필드 정리 (timestamp 또는 createdAt)
-          if (!msg.timestamp && msg.createdAt) {
-            msg.timestamp = msg.createdAt;
-          }
-          
-          return true;
-        });
-        
-        setChatMessages(validMessages);
-      }
-    } catch (error) {
-      console.error('채팅 메시지 로드 실패:', error);
-      setChatMessages([]);
     }
   };
 
@@ -432,18 +435,7 @@ const GroupVoting = ({ meetingId, currentUserId = 1, candidatePlaces, onTabChang
         clearInterval(chatInterval);
       };
     }
-  }, [meetingId]);
-
-  const loadMeeting = async () => {
-    try {
-      const response = await api.get(`/meetings/${meetingId}`);
-      setMeeting(response.data);
-      
-      // 감정 반응 관련 코드 제거
-    } catch (error) {
-      console.error('미팅 정보 로드 실패:', error);
-    }
-  };
+  }, [meetingId, loadChatMessages]);
 
   // candidatePlaces prop이 변경될 때 meeting 상태를 업데이트
   useEffect(() => {
@@ -467,7 +459,7 @@ const GroupVoting = ({ meetingId, currentUserId = 1, candidatePlaces, onTabChang
       // candidatePlaces prop이 없거나 비어있을 때만 API에서 로드
       loadMeeting();
     }
-  }, [meetingId, candidatePlaces]);
+  }, [meetingId, candidatePlaces, loadMeeting]);
 
   // 투표 처리 - 서버 API 사용
   const handleVote = async (placeId) => {
@@ -486,6 +478,11 @@ const GroupVoting = ({ meetingId, currentUserId = 1, candidatePlaces, onTabChang
     const targetPlace = meeting.candidatePlaces.find(place => place.id === placeId);
     if (!targetPlace) {
       alert('유효하지 않은 장소입니다. 페이지를 새로고침 후 다시 시도해주세요.');
+      return;
+    }
+
+    // 중복 요청 방지
+    if (loading) {
       return;
     }
 
@@ -514,15 +511,31 @@ const GroupVoting = ({ meetingId, currentUserId = 1, candidatePlaces, onTabChang
       }
     } catch (error) {
       console.error('투표 처리 중 오류:', error);
-      if (error.response?.status === 404) {
+      
+      if (error.code === 'ECONNABORTED') {
+        alert('네트워크 연결이 느려 투표 요청이 취소되었습니다. 다시 시도해주세요.');
+      } else if (error.response?.status === 404) {
         alert('투표하려는 장소를 찾을 수 없습니다. 페이지를 새로고침 후 다시 시도해주세요.');
+      } else if (error.response?.status === 409) {
+        alert('이미 투표가 처리되었습니다. 페이지를 새로고침해주세요.');
+        // 자동으로 투표 데이터 새로고침
+        loadVoteData();
+      } else if (error.response?.status === 503) {
+        alert('데이터베이스 연결이 불안정합니다. 잠시 후 다시 시도해주세요.');
+      } else if (error.response?.status === 500) {
+        alert('서버 오류가 발생했습니다. 잠시 후 다시 시도해주세요.');
+      } else if (error.response?.status === 400) {
+        alert('잘못된 요청입니다. 페이지를 새로고침 후 다시 시도해주세요.');
+      } else if (!error.response) {
+        alert('네트워크 연결을 확인해주세요. 인터넷이 연결되어 있는지 확인 후 다시 시도해주세요.');
       } else {
-        alert('투표 처리 중 오류가 발생했습니다. 다시 시도해주세요.');
+        const errorMessage = error.response?.data?.message || '투표 처리 중 오류가 발생했습니다. 다시 시도해주세요.';
+        alert(errorMessage);
       }
+    } finally {
+      // 로딩 상태를 항상 해제
+      setLoading(false);
     }
-    
-    // 로딩 상태 해제
-    setLoading(false);
   };
 
   // 후보 장소 삭제 (주최자만 가능)
@@ -566,23 +579,20 @@ const GroupVoting = ({ meetingId, currentUserId = 1, candidatePlaces, onTabChang
     }
   };
 
-  // 주최자만 장소를 삭제할 수 있는지 확인
-  const canDeletePlace = (candidate) => {
-    return isOwner; // 주최자만 삭제 가능
-  };
-
   // 채팅 메시지에 반응 추가
   const addMessageReaction = async (messageId, emoji) => {
-    if (!meetingId) return;
+    if (!meetingId || !currentParticipant) return;
 
     try {
       const response = await api.post(`/chat/${meetingId}/messages/${messageId}/reactions`, {
-        emoji: emoji
+        emoji: emoji,
+        userId: currentParticipant.id
       });
       
       if (response.data.success) {
-        // 반응 추가 성공 시 채팅 메시지 새로고침
+        // 반응 추가/제거 성공 시 채팅 메시지 새로고침
         await loadChatMessages();
+        console.log(`이모지 반응 ${response.data.action}: ${emoji}`);
       }
     } catch (error) {
       console.error('반응 추가 실패:', error);
@@ -615,18 +625,6 @@ const GroupVoting = ({ meetingId, currentUserId = 1, candidatePlaces, onTabChang
     
     const totalVotes = meeting.candidatePlaces.reduce((sum, cp) => sum + (cp.votes || 0), 0);
     return totalVotes > 0 ? (candidate.votes / totalVotes * 100) : 0;
-  };
-
-  // 사용자가 투표했는지 확인하는 함수 (어떤 장소든)
-  const hasUserVotedAny = () => {
-    if (!currentParticipant || !meetingId) return false;
-    
-    for (const [placeId, voters] of Object.entries(globalVotes)) {
-      if (voters.some(voter => voter.id === currentParticipant.id)) {
-        return true;
-      }
-    }
-    return false;
   };
 
   // 특정 장소에 사용자가 투표했는지 확인하는 함수
@@ -745,7 +743,6 @@ const GroupVoting = ({ meetingId, currentUserId = 1, candidatePlaces, onTabChang
           await saveMeetingHistory(user, updatedMeeting);
           alert(`🎉 ${selectedPlace.name}이(가) 최종 장소로 선정되었습니다!\n\n✅ 미팅 히스토리에 저장되었습니다.`);
         } catch (historyError) {
-          console.error('히스토리 저장 실패:', historyError);
           alert(`🎉 ${selectedPlace.name}이(가) 최종 장소로 선정되었습니다!\n\n⚠️ 히스토리 저장에 실패했습니다. 대시보드에서 확인해주세요.`);
         }
       } else {
@@ -753,9 +750,18 @@ const GroupVoting = ({ meetingId, currentUserId = 1, candidatePlaces, onTabChang
       }
       
     } catch (error) {
-      console.error('최종 장소 선정 처리 실패:', error);
       alert(`🎉 ${selectedPlace.name}이(가) 최종 장소로 선정되었습니다!`);
     }
+  };
+
+  // 채팅 반응 이모지 정의
+  const chatReactionEmojis = ['👍', '❤️', '😂', '🎉', '😮'];
+
+  // 현재 사용자가 특정 이모지에 반응했는지 확인
+  const hasUserReacted = (message, emoji) => {
+    if (!currentParticipant || !message.userReactions) return false;
+    const usersWhoReacted = message.userReactions[emoji] || [];
+    return usersWhoReacted.includes(currentParticipant.id);
   };
 
   if (!meeting) {
@@ -768,8 +774,6 @@ const GroupVoting = ({ meetingId, currentUserId = 1, candidatePlaces, onTabChang
       </div>
     );
   }
-
-  const chatReactionEmojis = ['👍', '❤️', '😂', '🎉', '😮'];
 
   return (
     <>
@@ -845,7 +849,7 @@ const GroupVoting = ({ meetingId, currentUserId = 1, candidatePlaces, onTabChang
               </div>
               <div className="flex items-center gap-4">
                 <div className="text-sm text-gray-600">
-                  {getUniqueVoters().size}명이 투표에 참여했습니다
+                  <span className="font-medium">{getUniqueVoters().size}명</span>이 투표했습니다
                 </div>
                 {isOwner && getUniqueVoters().size > 0 && (
                   <button
@@ -891,13 +895,8 @@ const GroupVoting = ({ meetingId, currentUserId = 1, candidatePlaces, onTabChang
                         {candidate.address && (
                           <p className="text-sm text-gray-600 mb-1">{candidate.address}</p>
                         )}
-                        {candidate.rating && (
-                          <div className="flex items-center text-sm text-gray-600">
-                            <StarIcon className="h-4 w-4 text-yellow-400 mr-1" />
-                            <span>{candidate.rating}</span>
-                          </div>
-                        )}
                       </div>
+                      
                       <div className="flex items-center gap-2">
                         <button
                           onClick={() => handleVote(candidate.id)}
@@ -919,7 +918,7 @@ const GroupVoting = ({ meetingId, currentUserId = 1, candidatePlaces, onTabChang
                           ) : userVoted ? '투표 취소' : '투표하기'
                           }
                         </button>
-                        {canDeletePlace(candidate) && (
+                        {isOwner && (
                           <button
                             onClick={() => handleDeletePlace(candidate.id, candidate.name)}
                             className="px-3 py-2 text-sm text-red-600 hover:text-red-700 hover:bg-red-50 rounded-lg border border-red-200 hover:border-red-300 transition-all duration-200 flex items-center gap-1"
@@ -983,27 +982,39 @@ const GroupVoting = ({ meetingId, currentUserId = 1, candidatePlaces, onTabChang
                         <div className="flex items-center space-x-2">
                           <span className="text-sm font-medium text-gray-900">{message.userName}</span>
                           <span className="text-xs text-gray-500">
-                            {formatVoteTime(message.timestamp || message.createdAt)}
+                            {new Date(message.timestamp || message.createdAt).toLocaleTimeString()}
                           </span>
                         </div>
                         <p className="text-sm text-gray-700 mt-1">{message.message}</p>
                         
                         {/* 메시지 반응 */}
                         <div className="flex items-center space-x-1 mt-2">
-                          {chatReactionEmojis.map((emoji) => (
-                            <button
-                              key={emoji}
-                              onClick={() => addMessageReaction(message.id, emoji)}
-                              className="text-sm hover:bg-gray-100 rounded px-1 py-0.5 transition-colors duration-200"
-                            >
-                              {emoji}
-                              {message.reactions?.[emoji] && (
-                                <span className="ml-1 text-xs text-gray-600">
-                                  {message.reactions[emoji]}
-                                </span>
-                              )}
-                            </button>
-                          ))}
+                          {chatReactionEmojis.map((emoji) => {
+                            const reactionCount = message.reactions?.[emoji] || 0;
+                            const userReacted = hasUserReacted(message, emoji);
+                            
+                            return (
+                              <button
+                                key={emoji}
+                                onClick={() => addMessageReaction(message.id, emoji)}
+                                className={`text-sm rounded px-2 py-1 transition-all duration-200 ${
+                                  userReacted
+                                    ? 'bg-blue-100 text-blue-700 border border-blue-300 shadow-sm'
+                                    : 'hover:bg-gray-100 text-gray-700'
+                                }`}
+                                title={userReacted ? '반응 취소' : '반응하기'}
+                              >
+                                {emoji}
+                                {reactionCount > 0 && (
+                                  <span className={`ml-1 text-xs ${
+                                    userReacted ? 'text-blue-600' : 'text-gray-600'
+                                  }`}>
+                                    {reactionCount}
+                                  </span>
+                                )}
+                              </button>
+                            );
+                          })}
                         </div>
                       </div>
                     </div>
@@ -1108,6 +1119,30 @@ const GroupVoting = ({ meetingId, currentUserId = 1, candidatePlaces, onTabChang
       )}
     </>
   );
+};
+
+GroupVoting.propTypes = {
+  meetingId: PropTypes.string.isRequired,
+  candidatePlaces: PropTypes.arrayOf(PropTypes.shape({
+    id: PropTypes.string.isRequired,
+    name: PropTypes.string.isRequired,
+    category: PropTypes.string,
+    address: PropTypes.string,
+    coordinates: PropTypes.shape({
+      lat: PropTypes.number,
+      lng: PropTypes.number
+    }),
+    rating: PropTypes.number,
+    photos: PropTypes.arrayOf(PropTypes.string),
+    votes: PropTypes.number,
+    voters: PropTypes.array
+  })),
+  onTabChange: PropTypes.func
+};
+
+GroupVoting.defaultProps = {
+  candidatePlaces: [],
+  onTabChange: null
 };
 
 export default GroupVoting; 

@@ -11,6 +11,15 @@ router.get('/:meetingId', async (req, res) => {
     const { meetingId } = req.params;
     console.log(`투표 데이터 조회 요청: meetingId=${meetingId}`);
     
+    // MongoDB 연결 상태 확인
+    if (mongoose.connection.readyState !== 1) {
+      console.error('MongoDB 연결 상태:', mongoose.connection.readyState);
+      return res.status(503).json({
+        success: false,
+        message: '데이터베이스 연결이 불안정합니다. 잠시 후 다시 시도해주세요.'
+      });
+    }
+    
     // DB에서 투표 데이터, 후보 장소, 선정 이력 조회
     const [votes, candidatePlaces, selectionHistory, selectionCounts] = await Promise.all([
       Vote.getVotesByMeeting(meetingId),
@@ -89,9 +98,23 @@ router.get('/:meetingId', async (req, res) => {
     });
   } catch (error) {
     console.error('투표 데이터 조회 실패:', error);
+    console.error('투표 데이터 조회 실패 상세:', {
+      name: error.name,
+      message: error.message,
+      stack: error.stack,
+      code: error.code
+    });
+    
+    if (error.name === 'MongoNetworkError' || error.name === 'MongooseServerSelectionError') {
+      return res.status(503).json({
+        success: false,
+        message: '데이터베이스 연결에 실패했습니다. 잠시 후 다시 시도해주세요.'
+      });
+    }
+    
     res.status(500).json({
       success: false,
-      message: '투표 데이터 조회 중 오류가 발생했습니다.'
+      message: '투표 데이터 조회 중 오류가 발생했습니다. 잠시 후 다시 시도해주세요.'
     });
   }
 });
@@ -101,6 +124,17 @@ router.post('/:meetingId/vote', async (req, res) => {
   try {
     const { meetingId } = req.params;
     const { placeId, participant } = req.body;
+    
+    console.log('투표 요청 받음:', { meetingId, placeId, participant });
+    
+    // MongoDB 연결 상태 확인
+    if (mongoose.connection.readyState !== 1) {
+      console.error('MongoDB 연결 상태:', mongoose.connection.readyState);
+      return res.status(500).json({
+        success: false,
+        message: '데이터베이스 연결이 불안정합니다. 잠시 후 다시 시도해주세요.'
+      });
+    }
     
     if (!placeId || !participant || !participant.id) {
       return res.status(400).json({
@@ -131,28 +165,46 @@ router.post('/:meetingId/vote', async (req, res) => {
     const existingVote = await Vote.getUserVote(meetingId, participant.id);
     let message = '';
     
-    if (existingVote) {
-      if (existingVote.placeId === placeId) {
-        // 같은 장소 재투표 - 투표 취소
-        await Vote.findByIdAndDelete(existingVote._id);
-        message = '투표가 취소되었습니다.';
+    try {
+      if (existingVote) {
+        if (existingVote.placeId === placeId) {
+          // 같은 장소 재투표 - 투표 취소
+          await Vote.findByIdAndDelete(existingVote._id);
+          message = '투표가 취소되었습니다.';
+          console.log('투표 취소 완료:', { meetingId, placeId, participantId: participant.id });
+        } else {
+          // 다른 장소로 투표 변경
+          existingVote.placeId = placeId;
+          existingVote.placeName = candidatePlace.name;
+          existingVote.votedAt = new Date();
+          await existingVote.save();
+          message = '투표가 변경되었습니다.';
+          console.log('투표 변경 완료:', { meetingId, fromPlaceId: existingVote.placeId, toPlaceId: placeId });
+        }
       } else {
-        // 다른 장소로 투표 변경
-        existingVote.placeId = placeId;
-        existingVote.placeName = candidatePlace.name;
-        existingVote.votedAt = new Date();
-        await existingVote.save();
-        message = '투표가 변경되었습니다.';
+        // 새로운 투표
+        const newVote = new Vote({
+          meetingId,
+          placeId,
+          placeName: candidatePlace.name,
+          voter: participant
+        });
+        await newVote.save();
+        message = '투표가 완료되었습니다.';
+        console.log('새 투표 완료:', { meetingId, placeId, participantId: participant.id });
       }
-    } else {
-      // 새로운 투표
-      await new Vote({
-        meetingId,
-        placeId,
-        placeName: candidatePlace.name,
-        voter: participant
-      }).save();
-      message = '투표가 완료되었습니다.';
+    } catch (voteError) {
+      console.error('투표 처리 중 데이터베이스 오류:', voteError);
+      
+      if (voteError.code === 11000) {
+        // 중복 투표 방지 (동시성 문제)
+        return res.status(409).json({
+          success: false,
+          message: '이미 투표가 처리되었습니다. 페이지를 새로고침해주세요.'
+        });
+      }
+      
+      throw voteError;
     }
     
     // 최신 투표 데이터 반환
@@ -167,9 +219,30 @@ router.post('/:meetingId/vote', async (req, res) => {
     });
   } catch (error) {
     console.error('투표 처리 실패:', error);
+    console.error('투표 처리 실패 상세:', {
+      name: error.name,
+      message: error.message,
+      stack: error.stack,
+      code: error.code
+    });
+    
+    if (error.name === 'MongoNetworkError' || error.name === 'MongooseServerSelectionError') {
+      return res.status(503).json({
+        success: false,
+        message: '데이터베이스 연결에 실패했습니다. 잠시 후 다시 시도해주세요.'
+      });
+    }
+    
+    if (error.name === 'ValidationError') {
+      return res.status(400).json({
+        success: false,
+        message: '입력 데이터가 올바르지 않습니다.'
+      });
+    }
+    
     res.status(500).json({
       success: false,
-      message: '투표 처리 중 오류가 발생했습니다.'
+      message: '투표 처리 중 오류가 발생했습니다. 잠시 후 다시 시도해주세요.'
     });
   }
 });

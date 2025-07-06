@@ -322,6 +322,17 @@ const RandomSelector = ({ meetingId, onLocationSelected }) => {
   const [gamePhase, setGamePhase] = useState('waiting'); // 'waiting', 'running', 'stopped', 'finished'
   const [gameInterval, setGameInterval] = useState(null);
   const [stoppedTime, setStoppedTime] = useState(null);
+  
+  // 멀티플레이어 타이밍 게임 상태
+  const [multiplayerMode, setMultiplayerMode] = useState(false);
+  const [gameId, setGameId] = useState(null);
+  const [gamePlayers, setGamePlayers] = useState([]);
+  const [currentPlayer, setCurrentPlayer] = useState(null);
+  const [gameResults, setGameResults] = useState([]);
+  const [gameWinner, setGameWinner] = useState(null);
+  const [isGameOwner, setIsGameOwner] = useState(false);
+  const [gameAutoEndTime, setGameAutoEndTime] = useState(null);
+  const [gameTimeRemaining, setGameTimeRemaining] = useState(null);
 
   // localStorage에서 룰렛 결과 복원
   useEffect(() => {
@@ -349,6 +360,23 @@ const RandomSelector = ({ meetingId, onLocationSelected }) => {
       }
     };
   }, [gameInterval]);
+
+  // 게임 자동 종료 시간 카운트다운
+  useEffect(() => {
+    if (gameAutoEndTime && gameRunning) {
+      const interval = setInterval(() => {
+        const remaining = gameAutoEndTime - Date.now();
+        if (remaining > 0) {
+          setGameTimeRemaining(remaining);
+        } else {
+          setGameTimeRemaining(0);
+          clearInterval(interval);
+        }
+      }, 1000);
+
+      return () => clearInterval(interval);
+    }
+  }, [gameAutoEndTime, gameRunning]);
 
   // Socket.io 연결 설정
   useEffect(() => {
@@ -425,6 +453,114 @@ const RandomSelector = ({ meetingId, onLocationSelected }) => {
             loadCandidatePlacesData(true, false);
           }
         }, 1000);
+      });
+
+      // 멀티플레이어 타이밍 게임 이벤트들
+      newSocket.on('timing-game-started', (data) => {
+        console.log('🎮 멀티플레이어 타이밍 게임 시작:', data);
+        setGameId(data.gameId);
+        setTargetTime(data.targetTime);
+        setMultiplayerMode(true);
+        setTimingGameMode(true);
+        setCurrentTime(0);
+        setGamePhase('running');
+        setGameRunning(true);
+        setGamePlayers([]);
+        setGameResults([]);
+        setGameWinner(null);
+        setGameAutoEndTime(data.autoEndTime);
+        
+        // 타이머 시작
+        const interval = setInterval(() => {
+          setCurrentTime(prev => prev + 10);
+        }, 10);
+        setGameInterval(interval);
+      });
+
+      newSocket.on('timing-game-players-updated', (data) => {
+        console.log('🎮 타이밍 게임 플레이어 업데이트:', data);
+        setGamePlayers(data.players);
+      });
+
+      newSocket.on('timing-game-player-result', (data) => {
+        console.log('🎮 플레이어 결과 수신:', data);
+        setGamePlayers(data.players);
+        
+        // 새로운 결과 추가 (중복 방지)
+        setGameResults(prev => {
+          const existingResult = prev.find(r => r.playerId === data.playerId);
+          if (existingResult) return prev;
+          
+          return [...prev, {
+            playerId: data.playerId,
+            playerName: data.playerName,
+            stoppedTime: data.stoppedTime,
+            difference: data.difference
+          }];
+        });
+      });
+
+      newSocket.on('timing-game-finished', (data) => {
+        console.log('🎮 타이밍 게임 최종 결과:', data);
+        setGameWinner(data.winner);
+        setGameResults(data.results);
+        setGamePhase('finished');
+        setGameRunning(false);
+        
+        // 게임 인터벌 정리
+        if (gameInterval) {
+          clearInterval(gameInterval);
+          setGameInterval(null);
+        }
+        
+        // 우승자의 장소를 최종 선정
+        if (data.winner && candidatePlaces.length > 0) {
+          const winnerPlace = candidatePlaces[Math.floor(Math.random() * candidatePlaces.length)];
+          recordSelectionOnServer(winnerPlace);
+          
+          const resultData = {
+            selectedPlace: winnerPlace,
+            message: `🏆 ${data.winner.name}님이 승리하여 "${winnerPlace.name}"이(가) 선정되었습니다!\n목표: ${data.targetTime.toFixed(2)}초, 기록: ${(data.winner.stoppedTime/1000).toFixed(2)}초 (차이: ${data.winner.difference}ms)`,
+            fairnessInfo: getFairnessInfo(winnerPlace),
+            isRestoredResult: false,
+            timestamp: new Date().toISOString(),
+            selectionMethod: 'multiplayer-timing'
+          };
+          
+          setResult(resultData);
+          setResultAnimating(true);
+          
+          setTimeout(() => setResultAnimating(false), 3000);
+          
+          if (onLocationSelected) {
+            onLocationSelected(winnerPlace);
+          }
+        }
+      });
+
+      newSocket.on('timing-game-reset', (data) => {
+        console.log('🎮 타이밍 게임 리셋:', data);
+        resetMultiplayerTimingGame();
+      });
+
+      newSocket.on('timing-game-cancelled', (data) => {
+        console.log('🎮 타이밍 게임 취소:', data);
+        setGamePhase('cancelled');
+        setGameRunning(false);
+        
+        // 게임 인터벌 정리
+        if (gameInterval) {
+          clearInterval(gameInterval);
+          setGameInterval(null);
+        }
+        
+        // 취소 메시지 표시
+        alert(data.reason || '게임이 취소되었습니다.');
+        
+        // 3초 후 자동 리셋
+        setTimeout(() => {
+          resetMultiplayerTimingGame();
+        }, 3000);
       });
 
       return () => {
@@ -858,10 +994,16 @@ const RandomSelector = ({ meetingId, onLocationSelected }) => {
     setQuizAnswer('');
   };
 
-  // 타이밍 게임 시작
-  const startTimingGame = () => {
+  // 멀티플레이어 타이밍 게임 시작
+  const startMultiplayerTimingGame = () => {
     if (candidatePlaces.length === 0) {
       alert('후보 장소가 없습니다.');
+      return;
+    }
+
+    const participant = getCurrentParticipant();
+    if (!participant) {
+      alert('먼저 미팅에 참가해주세요.');
       return;
     }
 
@@ -871,24 +1013,85 @@ const RandomSelector = ({ meetingId, onLocationSelected }) => {
     // 1.00~7.00 초 사이의 랜덤 목표 시간 생성 (0.5초 단위)
     const possibleTimes = [1.0, 1.5, 2.0, 2.5, 3.0, 3.5, 4.0, 4.5, 5.0, 5.5, 6.0, 6.5, 7.0];
     const randomTarget = possibleTimes[Math.floor(Math.random() * possibleTimes.length)];
+    const newGameId = `timing_${meetingId}_${Date.now()}`;
     
-    setTargetTime(randomTarget);
-    setTimingGameMode(true);
-    setCurrentTime(0);
-    setStoppedTime(null);
-    setGamePhase('running');
-    setGameRunning(true);
+    // 게임 생성자로 설정
+    setIsGameOwner(true);
+    setCurrentPlayer(participant);
     
-    // 타이머 시작 (10ms마다 업데이트)
-    const interval = setInterval(() => {
-      setCurrentTime(prev => prev + 10);
-    }, 10);
-    
-    setGameInterval(interval);
+    // 소켓을 통해 게임 시작 알림
+    if (socket) {
+      socket.emit('timing-game-start', {
+        meetingId,
+        targetTime: randomTarget,
+        gameId: newGameId,
+        startedBy: participant.name
+      });
+      
+      // 자신도 게임에 참가
+      socket.emit('timing-game-join', {
+        meetingId,
+        player: participant
+      });
+    }
   };
 
-  // Stop 버튼 클릭
+  // 기존 싱글플레이어 타이밍 게임 시작 (참고용으로 유지)
+  const startTimingGame = () => {
+    // 멀티플레이어 모드로 대체
+    startMultiplayerTimingGame();
+  };
+
+  // 멀티플레이어 게임 참가
+  const joinMultiplayerTimingGame = () => {
+    const participant = getCurrentParticipant();
+    if (!participant) {
+      alert('먼저 미팅에 참가해주세요.');
+      return;
+    }
+    
+    if (socket && gameId) {
+      setCurrentPlayer(participant);
+      socket.emit('timing-game-join', {
+        meetingId,
+        player: participant
+      });
+    }
+  };
+
+  // 멀티플레이어 타이밍 게임 스톱
+  const stopMultiplayerTimingGame = () => {
+    if (!gameRunning || !currentPlayer || !multiplayerMode) return;
+    
+    const finalTime = currentTime;
+    setStoppedTime(finalTime);
+    setGameRunning(false);
+    setGamePhase('stopped');
+    
+    // 인터벌 중지 (개인)
+    if (gameInterval) {
+      clearInterval(gameInterval);
+      setGameInterval(null);
+    }
+    
+    // 소켓을 통해 결과 전송
+    if (socket) {
+      socket.emit('timing-game-stop', {
+        meetingId,
+        playerId: currentPlayer.id,
+        stoppedTime: finalTime
+      });
+    }
+  };
+
+  // Stop 버튼 클릭 (멀티플레이어/싱글플레이어 구분)
   const stopTimingGame = () => {
+    if (multiplayerMode) {
+      stopMultiplayerTimingGame();
+      return;
+    }
+    
+    // 기존 싱글플레이어 로직 (참고용으로 유지하지만 현재는 사용하지 않음)
     if (!gameRunning) return;
     
     const finalTime = currentTime;
@@ -977,6 +1180,47 @@ const RandomSelector = ({ meetingId, onLocationSelected }) => {
     setStoppedTime(null);
     setGameRunning(false);
     setGamePhase('waiting');
+    
+    // 멀티플레이어 모드도 초기화
+    if (multiplayerMode) {
+      resetMultiplayerTimingGame();
+    }
+  };
+
+  // 멀티플레이어 타이밍 게임 초기화
+  const resetMultiplayerTimingGame = () => {
+    setMultiplayerMode(false);
+    setGameId(null);
+    setGamePlayers([]);
+    setCurrentPlayer(null);
+    setGameResults([]);
+    setGameWinner(null);
+    setIsGameOwner(false);
+    setTimingGameMode(false);
+    setTargetTime(null);
+    setCurrentTime(0);
+    setStoppedTime(null);
+    setGameRunning(false);
+    setGamePhase('waiting');
+    setGameAutoEndTime(null);
+    setGameTimeRemaining(null);
+    
+    if (gameInterval) {
+      clearInterval(gameInterval);
+      setGameInterval(null);
+    }
+  };
+
+  // 현재 참가자 정보 가져오기
+  const getCurrentParticipant = () => {
+    const participantKey = `meeting_${meetingId}_participant`;
+    const participantData = localStorage.getItem(participantKey);
+    try {
+      return participantData ? JSON.parse(participantData) : null;
+    } catch (error) {
+      console.warn('참가자 데이터 파싱 실패:', error);
+      return null;
+    }
   };
 
   // 시간을 MM:SS:MS 형식으로 포맷
@@ -1251,20 +1495,21 @@ const RandomSelector = ({ meetingId, onLocationSelected }) => {
           </div>
         )}
 
-        {/* 타이밍 게임 모드 */}
+        {/* 멀티플레이어 타이밍 게임 모드 */}
         {fairnessMode === 'balanced' && (
           <div className="flex flex-col items-center space-y-6">
-            <h3 className="text-xl font-bold text-gray-900 mb-4">⏱️ 타이밍 스톱 게임</h3>
+            <h3 className="text-xl font-bold text-gray-900 mb-4">🎮 멀티플레이어 타이밍 스톱 게임</h3>
             
             {!timingGameMode ? (
               <div className="text-center space-y-4">
                 <div className="bg-purple-50 rounded-lg p-6 max-w-lg">
                   <p className="text-purple-800 font-medium mb-2">🎯 게임 방법</p>
                   <p className="text-sm text-purple-700">
-                    목표 시간이 공개됩니다.<br/>
-                    타이머가 0.00초부터 카운트업 하는 동안<br/>
-                    목표 시간에 가장 근접한 순간에 <strong>STOP</strong>을 누르세요!<br/>
-                    차이가 0.5초 이하면 성공입니다.
+                    <strong>🔥 실시간 대전!</strong><br/>
+                    목표 시간이 공개되면<br/>
+                    모든 참가자가 동시에 타이머를 보면서<br/>
+                    목표 시간에 가장 가까운 순간에 <strong>STOP</strong>을 누르세요!<br/>
+                    <strong>가장 정확한 사람이 승리합니다!</strong>
                   </p>
                 </div>
                 
@@ -1273,23 +1518,58 @@ const RandomSelector = ({ meetingId, onLocationSelected }) => {
                   disabled={candidatePlaces.length === 0}
                   className="px-8 py-4 rounded-lg font-bold text-lg transition-all duration-300 w-full max-w-md bg-gradient-to-r from-purple-500 to-indigo-600 text-white hover:from-purple-600 hover:to-indigo-700 hover:transform hover:scale-105 shadow-lg"
                 >
-                  ⏱️ 타이밍 게임 시작!
+                  🎮 멀티플레이어 게임 시작!
                 </button>
               </div>
             ) : (
-              <div className="w-full max-w-lg space-y-6">
+              <div className="w-full max-w-4xl space-y-6">
                 {gamePhase === 'running' && (
-                  <div className="text-center space-y-6">
-                    {/* 목표 시간 표시 */}
-                    <div className="bg-gradient-to-r from-yellow-50 to-orange-50 rounded-lg p-4 border-2 border-yellow-300">
-                      <h4 className="text-xl font-bold text-orange-900 mb-2">
-                        🎯 목표: {targetTime.toFixed(2)}초에 STOP을 누르세요!
-                      </h4>
+                  <div className="space-y-6">
+                    {/* 목표 시간과 참가자 현황 */}
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                      <div className="bg-gradient-to-r from-yellow-50 to-orange-50 rounded-lg p-4 border-2 border-yellow-300">
+                        <h4 className="text-xl font-bold text-orange-900 mb-2">
+                          🎯 목표: {targetTime.toFixed(2)}초
+                        </h4>
+                        <p className="text-sm text-orange-700">모든 플레이어가 동시에 도전!</p>
+                      </div>
+                      
+                      <div className="bg-blue-50 rounded-lg p-4 border-2 border-blue-300">
+                        <h4 className="text-lg font-bold text-blue-900 mb-2">
+                          👥 참가자 ({gamePlayers.length}명)
+                        </h4>
+                        <div className="flex flex-wrap gap-1">
+                          {gamePlayers.map(player => (
+                            <span 
+                              key={player.id} 
+                              className={`px-2 py-1 rounded-full text-xs font-medium ${
+                                player.hasResult 
+                                  ? 'bg-green-100 text-green-800' 
+                                  : 'bg-gray-100 text-gray-700'
+                              }`}
+                            >
+                              {player.name} {player.hasResult && '✓'}
+                            </span>
+                          ))}
+                        </div>
+                      </div>
                     </div>
                     
                     <div className="bg-gradient-to-r from-purple-50 to-indigo-50 rounded-lg p-8 border-2 border-purple-200">
                       {/* 현재 타이머 */}
-                      <div className="mb-6">
+                      {/* 시간 제한 표시 */}
+                      {gameTimeRemaining !== null && (
+                        <div className="mb-4 text-center">
+                          <p className="text-sm text-red-600 mb-2">⏰ 게임 자동 종료까지</p>
+                          <div className={`w-full bg-red-100 text-red-700 rounded-lg p-3 font-mono text-lg font-bold border-2 border-red-300 ${
+                            gameTimeRemaining <= 30000 ? 'animate-pulse' : ''
+                          }`}>
+                            {Math.ceil(gameTimeRemaining / 1000)}초
+                          </div>
+                        </div>
+                      )}
+                      
+                      <div className="mb-6 text-center">
                         <p className="text-sm text-gray-600 mb-2">현재 시간</p>
                         <div className={`w-full bg-black text-green-400 rounded-lg p-6 font-mono text-4xl font-bold border-4 border-gray-800 ${
                           gameRunning ? 'animate-pulse shadow-2xl' : 'shadow-lg'
@@ -1298,25 +1578,66 @@ const RandomSelector = ({ meetingId, onLocationSelected }) => {
                         </div>
                       </div>
                       
-                      <button
-                        onClick={stopTimingGame}
-                        disabled={!gameRunning}
-                        className={`px-16 py-6 rounded-lg font-bold text-2xl transition-all duration-300 ${
-                          gameRunning 
-                            ? 'bg-gradient-to-r from-red-500 to-pink-600 text-white hover:from-red-600 hover:to-pink-700 hover:transform hover:scale-110 shadow-lg'
-                            : 'bg-gray-400 text-gray-200 cursor-not-allowed'
-                        }`}
-                      >
-                        🛑 STOP!
-                      </button>
+                      <div className="text-center space-y-4">
+                        {!currentPlayer ? (
+                          <button
+                            onClick={joinMultiplayerTimingGame}
+                            className="px-12 py-4 rounded-lg font-bold text-xl bg-gradient-to-r from-green-500 to-emerald-600 text-white hover:from-green-600 hover:to-emerald-700 hover:transform hover:scale-105 shadow-lg"
+                          >
+                            🎮 게임 참가하기!
+                          </button>
+                        ) : (
+                          <button
+                            onClick={stopTimingGame}
+                            disabled={!gameRunning || gamePlayers.find(p => p.id === currentPlayer.id)?.hasResult}
+                            className={`px-16 py-6 rounded-lg font-bold text-2xl transition-all duration-300 ${
+                              gameRunning && !gamePlayers.find(p => p.id === currentPlayer.id)?.hasResult
+                                ? 'bg-gradient-to-r from-red-500 to-pink-600 text-white hover:from-red-600 hover:to-pink-700 hover:transform hover:scale-110 shadow-lg'
+                                : 'bg-gray-400 text-gray-200 cursor-not-allowed'
+                            }`}
+                          >
+                            {gamePlayers.find(p => p.id === currentPlayer.id)?.hasResult ? '✓ 완료!' : '🛑 STOP!'}
+                          </button>
+                        )}
+                      </div>
                     </div>
                     
-                    <button
-                      onClick={resetTimingGame}
-                      className="px-6 py-3 bg-gray-500 text-white rounded-lg hover:bg-gray-600 font-bold"
-                    >
-                      ❌ 게임 중단
-                    </button>
+                    {/* 실시간 결과 현황 */}
+                    {gameResults.length > 0 && (
+                      <div className="bg-white rounded-lg p-6 border-2 border-gray-200">
+                        <h4 className="text-lg font-bold text-gray-900 mb-4">🏃‍♂️ 실시간 결과</h4>
+                        <div className="space-y-2">
+                          {gameResults.sort((a, b) => a.difference - b.difference).map((result, index) => (
+                            <div key={result.playerId} className={`flex justify-between items-center p-3 rounded-lg ${
+                              index === 0 ? 'bg-yellow-100 border border-yellow-300' : 'bg-gray-50'
+                            }`}>
+                              <div className="flex items-center space-x-2">
+                                <span className="font-bold text-lg">{index + 1}위</span>
+                                <span className="font-medium">{result.playerName}</span>
+                                {index === 0 && <span className="text-yellow-600">👑</span>}
+                              </div>
+                              <div className="text-right">
+                                <div className="font-mono text-sm">
+                                  {(result.stoppedTime/1000).toFixed(2)}초
+                                </div>
+                                <div className="text-xs text-gray-600">
+                                  차이: {result.difference}ms
+                                </div>
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+                    
+                    <div className="text-center">
+                      <button
+                        onClick={resetTimingGame}
+                        className="px-6 py-3 bg-gray-500 text-white rounded-lg hover:bg-gray-600 font-bold"
+                      >
+                        ❌ 게임 중단
+                      </button>
+                    </div>
                   </div>
                 )}
                 
@@ -1324,13 +1645,13 @@ const RandomSelector = ({ meetingId, onLocationSelected }) => {
                   <div className="text-center space-y-4">
                     <div className="bg-gradient-to-r from-yellow-50 to-orange-50 rounded-lg p-6 border-2 border-yellow-300">
                       <h4 className="text-lg font-bold text-orange-900 mb-4">
-                        🔍 결과 확인 중...
+                        ⏳ 다른 플레이어들의 결과를 기다리는 중...
                       </h4>
                       
                       <div className="flex justify-center items-center space-x-8">
                         <div className="text-center">
                           <p className="text-sm text-gray-600">목표 시간</p>
-                          <div className="bg-yellow-200 rounded-lg p-4 font-mono text-xl font-bold animate-pulse">
+                          <div className="bg-yellow-200 rounded-lg p-4 font-mono text-xl font-bold">
                             {targetTime.toFixed(2)}초
                           </div>
                         </div>
@@ -1338,7 +1659,7 @@ const RandomSelector = ({ meetingId, onLocationSelected }) => {
                         <div className="text-4xl">VS</div>
                         
                         <div className="text-center">
-                          <p className="text-sm text-gray-600">멈춘 시간</p>
+                          <p className="text-sm text-gray-600">내 기록</p>
                           <div className="bg-purple-200 rounded-lg p-4 font-mono text-xl font-bold">
                             {(stoppedTime/1000).toFixed(2)}초
                           </div>
@@ -1348,7 +1669,76 @@ const RandomSelector = ({ meetingId, onLocationSelected }) => {
                       <p className="text-sm text-gray-600 mt-4">
                         차이: {Math.abs(targetTime * 1000 - stoppedTime)}ms
                       </p>
+                      
+                      <div className="mt-4">
+                        <p className="text-sm text-orange-700">
+                          완료: {gamePlayers.filter(p => p.hasResult).length} / {gamePlayers.length}명
+                        </p>
+                        <div className="w-full bg-orange-200 rounded-full h-2 mt-2">
+                          <div 
+                            className="bg-orange-500 h-2 rounded-full transition-all duration-300"
+                            style={{ width: `${(gamePlayers.filter(p => p.hasResult).length / gamePlayers.length) * 100}%` }}
+                          />
+                        </div>
+                      </div>
                     </div>
+                  </div>
+                )}
+
+                {gamePhase === 'finished' && gameWinner && (
+                  <div className="text-center space-y-6">
+                    <div className="bg-gradient-to-r from-yellow-50 to-orange-50 rounded-lg p-8 border-2 border-yellow-300">
+                      <h4 className="text-2xl font-bold text-orange-900 mb-4">
+                        🏆 게임 완료!
+                      </h4>
+                      
+                      <div className="bg-yellow-100 rounded-lg p-6 mb-6 border border-yellow-300">
+                        <h5 className="text-xl font-bold text-yellow-900 mb-2">
+                          👑 우승자: {gameWinner.name}
+                        </h5>
+                        <div className="flex justify-center items-center space-x-4 text-lg">
+                          <span className="font-mono font-bold">{(gameWinner.stoppedTime/1000).toFixed(2)}초</span>
+                          <span className="text-gray-600">|</span>
+                          <span className="text-green-600 font-bold">차이: {gameWinner.difference}ms</span>
+                        </div>
+                      </div>
+                      
+                      <div className="bg-white rounded-lg p-4 border border-gray-200">
+                        <h6 className="font-bold text-gray-900 mb-3">📊 최종 순위</h6>
+                        <div className="space-y-2">
+                          {gameResults.map((result, index) => (
+                            <div key={result.id} className={`flex justify-between items-center p-3 rounded-lg ${
+                              index === 0 ? 'bg-yellow-100 border border-yellow-300' :
+                              index === 1 ? 'bg-gray-100 border border-gray-300' :
+                              index === 2 ? 'bg-orange-100 border border-orange-300' :
+                              'bg-gray-50'
+                            }`}>
+                              <div className="flex items-center space-x-3">
+                                <span className="font-bold text-lg">
+                                  {index === 0 ? '🥇' : index === 1 ? '🥈' : index === 2 ? '🥉' : `${index + 1}위`}
+                                </span>
+                                <span className="font-medium">{result.name}</span>
+                              </div>
+                              <div className="text-right">
+                                <div className="font-mono text-sm font-bold">
+                                  {(result.stoppedTime/1000).toFixed(2)}초
+                                </div>
+                                <div className="text-xs text-gray-600">
+                                  차이: {result.difference}ms
+                                </div>
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    </div>
+                    
+                    <button
+                      onClick={resetTimingGame}
+                      className="px-8 py-3 bg-purple-600 text-white rounded-lg hover:bg-purple-700 font-bold"
+                    >
+                      🎮 새 게임 시작하기
+                    </button>
                   </div>
                 )}
               </div>

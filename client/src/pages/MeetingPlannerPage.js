@@ -589,6 +589,25 @@ const MeetingPlannerPage = () => {
     return categoryLabels[category] || category;
   };
 
+  // 실제 투표한 사용자 수 계산 함수
+  const getActualVotersCount = () => {
+    if (!meeting?.candidatePlaces || meeting.candidatePlaces.length === 0) {
+      return 0;
+    }
+    
+    const allVoters = new Set();
+    meeting.candidatePlaces.forEach(candidate => {
+      const voters = candidate.voters || [];
+      voters.forEach(voter => {
+        if (voter?.id) {
+          allVoters.add(voter.id);
+        }
+      });
+    });
+    
+    return allVoters.size;
+  };
+
   if (loading) {
     return (
       <div className="min-h-screen bg-gray-50 flex items-center justify-center">
@@ -719,7 +738,7 @@ const MeetingPlannerPage = () => {
                 <div className="space-y-2 text-sm">
                   <div className="flex justify-between">
                     <span className="text-gray-600">투표 참가자</span>
-                    <span className="font-medium">{voteParticipants?.length || 0}명</span>
+                    <span className="font-medium">{getActualVotersCount()}명</span>
                   </div>
                   <div className="flex justify-between">
                     <span className="text-gray-600">후보 장소</span>

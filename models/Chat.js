@@ -26,6 +26,12 @@ const chatSchema = new mongoose.Schema({
     of: Number,
     default: new Map()
   },
+  // 사용자별 반응 추적 (이모지 -> 사용자 ID 배열)
+  userReactions: {
+    type: Map,
+    of: [String],
+    default: new Map()
+  },
   createdAt: {
     type: Date,
     default: Date.now,
@@ -51,6 +57,9 @@ chatSchema.virtual('id').get(function() {
 chatSchema.set('toJSON', {
   virtuals: true,
   transform: function(doc, ret) {
+    // id 필드를 명시적으로 추가 (virtual field 대신)
+    ret.id = ret._id.toString();
+    
     // reactions를 일반 객체로 변환 (Map → Object)
     if (ret.reactions instanceof Map) {
       ret.reactions = Object.fromEntries(ret.reactions);
@@ -58,6 +67,15 @@ chatSchema.set('toJSON', {
       ret.reactions = ret.reactions;
     } else {
       ret.reactions = {};
+    }
+    
+    // userReactions를 일반 객체로 변환 (Map → Object)
+    if (ret.userReactions instanceof Map) {
+      ret.userReactions = Object.fromEntries(ret.userReactions);
+    } else if (ret.userReactions && typeof ret.userReactions === 'object') {
+      ret.userReactions = ret.userReactions;
+    } else {
+      ret.userReactions = {};
     }
     
     // timestamp 필드명 통일 (createdAt → timestamp)

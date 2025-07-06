@@ -55,6 +55,9 @@ const io = socketIo(server, {
 
 const PORT = process.env.PORT || 5000;
 
+// 타이밍 게임 세션 관리 (메모리 기반)
+const timingGameSessions = new Map();
+
 // Socket.io 연결 처리
 io.on('connection', (socket) => {
   console.log('클라이언트 연결됨:', socket.id);
@@ -85,6 +88,207 @@ io.on('connection', (socket) => {
     });
   });
 
+  // 타이밍 게임 시작 이벤트
+  socket.on('timing-game-start', (data) => {
+    console.log('타이밍 게임 시작:', data);
+    const { meetingId, targetTime, gameId, startedBy } = data;
+    
+    // 게임 세션 초기화
+    const session = {
+      gameId,
+      targetTime,
+      startedBy,
+      startTime: Date.now(),
+      players: new Map(),
+      status: 'running',
+      autoEndTimer: null
+    };
+    
+    timingGameSessions.set(meetingId, session);
+    
+    // 자동 종료 타이머 설정 (목표 시간 + 15초 후 자동 종료)
+    const autoEndDelay = (targetTime + 15) * 1000;
+    session.autoEndTimer = setTimeout(() => {
+      console.log(`⏰ 타이밍 게임 자동 종료 - 미팅: ${meetingId}`);
+      endTimingGame(meetingId, 'timeout');
+    }, autoEndDelay);
+    
+    // 같은 미팅의 모든 클라이언트에게 게임 시작 알림
+    io.to(meetingId).emit('timing-game-started', {
+      gameId,
+      targetTime,
+      startedBy,
+      timestamp: Date.now(),
+      autoEndTime: Date.now() + autoEndDelay
+    });
+  });
+
+  // 타이밍 게임 플레이어 참가
+  socket.on('timing-game-join', (data) => {
+    console.log('타이밍 게임 참가:', data);
+    const { meetingId, player } = data;
+    
+    const session = timingGameSessions.get(meetingId);
+    if (session && session.status === 'running') {
+      // 플레이어 참가 정보 저장
+      session.players.set(player.id, {
+        ...player,
+        socketId: socket.id,
+        joinTime: Date.now(),
+        result: null
+      });
+      
+      // 현재 참가자 목록 업데이트
+      const playersList = Array.from(session.players.values()).map(p => ({
+        id: p.id,
+        name: p.name,
+        hasResult: p.result !== null
+      }));
+      
+      io.to(meetingId).emit('timing-game-players-updated', {
+        gameId: session.gameId,
+        players: playersList,
+        totalPlayers: playersList.length
+      });
+    }
+  });
+
+  // 타이밍 게임 종료 함수
+  const endTimingGame = (meetingId, reason = 'completed') => {
+    const session = timingGameSessions.get(meetingId);
+    if (!session || session.status !== 'running') return;
+    
+    // 자동 종료 타이머 정리
+    if (session.autoEndTimer) {
+      clearTimeout(session.autoEndTimer);
+      session.autoEndTimer = null;
+    }
+    
+    session.status = 'finished';
+    
+    // 결과가 있는 플레이어들만 순위 매기기
+    const playersWithResults = Array.from(session.players.values()).filter(p => p.result !== null);
+    
+    if (playersWithResults.length === 0) {
+      // 아무도 완료하지 않은 경우
+      io.to(meetingId).emit('timing-game-cancelled', {
+        gameId: session.gameId,
+        reason: reason === 'timeout' ? '시간 초과로 게임이 취소되었습니다.' : '게임이 취소되었습니다.',
+        timestamp: Date.now()
+      });
+    } else {
+      // 최종 결과 계산
+      const sortedPlayers = playersWithResults.sort((a, b) => 
+        a.result.difference - b.result.difference
+      );
+      
+      const winner = sortedPlayers[0];
+      
+      // 최종 결과 발송
+      io.to(meetingId).emit('timing-game-finished', {
+        gameId: session.gameId,
+        winner: {
+          id: winner.id,
+          name: winner.name,
+          stoppedTime: winner.result.stoppedTime,
+          difference: winner.result.difference
+        },
+        results: sortedPlayers.map(p => ({
+          id: p.id,
+          name: p.name,
+          stoppedTime: p.result.stoppedTime,
+          difference: p.result.difference,
+          rank: sortedPlayers.indexOf(p) + 1
+        })),
+        targetTime: session.targetTime,
+        reason: reason === 'timeout' ? 'timeout' : 'completed',
+        totalPlayers: session.players.size,
+        finishedPlayers: playersWithResults.length
+      });
+    }
+    
+    // 게임 세션 정리 (5분 후)
+    setTimeout(() => {
+      timingGameSessions.delete(meetingId);
+    }, 5 * 60 * 1000);
+  };
+
+  // 타이밍 게임 스톱 이벤트
+  socket.on('timing-game-stop', (data) => {
+    console.log('타이밍 게임 스톱:', data);
+    const { meetingId, playerId, stoppedTime } = data;
+    
+    const session = timingGameSessions.get(meetingId);
+    if (session && session.status === 'running') {
+      const player = session.players.get(playerId);
+      if (player && !player.result) {
+        // 플레이어 결과 저장
+        const targetMs = session.targetTime * 1000;
+        const difference = Math.abs(targetMs - stoppedTime);
+        
+        player.result = {
+          stoppedTime,
+          difference,
+          timestamp: Date.now()
+        };
+        
+        console.log(`✅ 플레이어 ${player.name} 결과: ${(stoppedTime/1000).toFixed(2)}초 (차이: ${difference}ms)`);
+        
+        // 모든 플레이어에게 결과 업데이트
+        const playersList = Array.from(session.players.values()).map(p => ({
+          id: p.id,
+          name: p.name,
+          hasResult: p.result !== null,
+          result: p.result
+        }));
+        
+        io.to(meetingId).emit('timing-game-player-result', {
+          gameId: session.gameId,
+          playerId,
+          playerName: player.name,
+          stoppedTime,
+          difference,
+          players: playersList
+        });
+        
+        // 모든 플레이어가 결과를 제출했는지 확인
+        const allPlayersFinished = Array.from(session.players.values()).every(p => p.result !== null);
+        
+        console.log(`🎮 게임 진행 상황 - 완료: ${playersList.filter(p => p.hasResult).length}/${playersList.length}명`);
+        
+        if (allPlayersFinished) {
+          console.log('🏁 모든 플레이어 완료, 게임 종료');
+          endTimingGame(meetingId, 'completed');
+        } else {
+          console.log('⏳ 다른 플레이어들을 기다리는 중...');
+        }
+      }
+    }
+  });
+
+  // 타이밍 게임 리셋 이벤트
+  socket.on('timing-game-reset', (data) => {
+    console.log('타이밍 게임 리셋:', data);
+    const { meetingId } = data;
+    
+    const session = timingGameSessions.get(meetingId);
+    if (session) {
+      // 자동 종료 타이머 정리
+      if (session.autoEndTimer) {
+        clearTimeout(session.autoEndTimer);
+        session.autoEndTimer = null;
+      }
+      
+      // 게임 세션 삭제
+      timingGameSessions.delete(meetingId);
+      
+      // 모든 클라이언트에게 리셋 알림
+      io.to(meetingId).emit('timing-game-reset', {
+        timestamp: Date.now()
+      });
+    }
+  });
+
   // 선정 결과 업데이트 이벤트
   socket.on('selection-updated', (data) => {
     console.log('선정 결과 업데이트:', data);
@@ -95,6 +299,35 @@ io.on('connection', (socket) => {
   // 연결 해제
   socket.on('disconnect', () => {
     console.log('클라이언트 연결 해제됨:', socket.id);
+    
+    // 연결 해제된 소켓이 참가한 타이밍 게임이 있는지 확인
+    for (const [meetingId, session] of timingGameSessions.entries()) {
+      for (const [playerId, player] of session.players.entries()) {
+        if (player.socketId === socket.id) {
+          session.players.delete(playerId);
+          
+          // 남은 플레이어들에게 업데이트 알림
+          const playersList = Array.from(session.players.values()).map(p => ({
+            id: p.id,
+            name: p.name,
+            hasResult: p.result !== null
+          }));
+          
+          io.to(meetingId).emit('timing-game-players-updated', {
+            gameId: session.gameId,
+            players: playersList,
+            totalPlayers: playersList.length
+          });
+          
+          break;
+        }
+      }
+      
+      // 세션에 플레이어가 없으면 삭제
+      if (session.players.size === 0) {
+        timingGameSessions.delete(meetingId);
+      }
+    }
   });
 });
 
