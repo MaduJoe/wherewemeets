@@ -276,6 +276,18 @@ const GroupVoting = ({ meetingId, candidatePlaces, onTabChange }) => {
     loadVoteData();
   }, [meetingId, loadVoteData]);
 
+  // 로그인한 사용자의 이름 자동 설정 및 모달 상태 관리
+  useEffect(() => {
+    if (showNameModal && user && user.name && !user.isGuest && !currentParticipant) {
+      setParticipantName(user.name);
+    } else if (!showNameModal) {
+      // 모달이 닫힐 때 이름 필드 초기화 (현재 참가자가 아닌 경우)
+      if (!currentParticipant) {
+        setParticipantName('');
+      }
+    }
+  }, [showNameModal, user, currentParticipant]);
+
   // ESC 키 이벤트 리스너 추가
   useEffect(() => {
     const handleEscapeKey = (event) => {

@@ -1,7 +1,7 @@
 const express = require('express');
 const router = express.Router();
 const UserMeetingHistory = require('../models/UserMeetingHistory');
-const auth = require('../middleware/auth');
+const { auth } = require('../middleware/auth');
 
 // 사용자의 미팅 히스토리 조회
 router.get('/:userId/history', async (req, res) => {

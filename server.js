@@ -420,6 +420,7 @@ app.use('/api/votes', voteRoutes);
 app.use('/api/places', placeRoutes);
 app.use('/api/subscription', subscriptionRoutes);
 app.use('/api/aiAssistant', aiAssistantRoutes);
+app.use('/api/ai-query-logs', require('./routes/aiQueryLogs'));
 app.use('/api/users', userHistoryRoutes);
 app.use('/api/chat', chatRoutes);
 

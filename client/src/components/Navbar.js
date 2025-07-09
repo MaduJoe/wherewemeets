@@ -38,8 +38,11 @@ const Navbar = () => {
               <>
                 {/* 게스트 사용자와 무료 사용자는 대시보드 링크 숨김 */}
                 {!user.isGuest && user.subscription === 'premium' && (
-                  <Link to="/dashboard" className="text-gray-700 hover:text-primary-600 transition duration-200">
-                    대시보드
+                  <Link 
+                    to={user.email === 'admin@wherewemeets.com' ? '/admin/ai-analytics' : '/dashboard'} 
+                    className="text-gray-700 hover:text-primary-600 transition duration-200"
+                  >
+                    {user.email === 'admin@wherewemeets.com' ? 'AI 분석' : '대시보드'}
                   </Link>
                 )}
                 {/* <Link to="/create-meeting" className="btn-primary">
@@ -57,12 +60,14 @@ const Navbar = () => {
                     <Link to="/pricing" className="block px-4 py-2 text-sm text-gray-700 hover:bg-gray-100">
                       요금제
                     </Link>
-                    <button 
-                      onClick={handleLogout}
-                      className="block w-full text-left px-4 py-2 text-sm text-gray-700 hover:bg-gray-100"
-                    >
-                      로그아웃
-                    </button>
+                    {!user.isGuest && (
+                      <button 
+                        onClick={handleLogout}
+                        className="block w-full text-left px-4 py-2 text-sm text-gray-700 hover:bg-gray-100"
+                      >
+                        로그아웃
+                      </button>
+                    )}
                   </div>
                 </div>
               </>
@@ -113,11 +118,11 @@ const Navbar = () => {
                 {/* 게스트 사용자와 무료 사용자는 대시보드 링크 숨김 */}
                 {!user.isGuest && user.subscription === 'premium' && (
                   <Link 
-                    to="/dashboard" 
+                    to={user.email === 'admin@wherewemeets.com' ? '/admin/ai-analytics' : '/dashboard'} 
                     className="block px-3 py-2 text-gray-700 hover:text-primary-600"
                     onClick={() => setIsMenuOpen(false)}
                   >
-                    대시보드
+                    {user.email === 'admin@wherewemeets.com' ? 'AI 분석' : '대시보드'}
                   </Link>
                 )}
                 <Link 
@@ -141,12 +146,14 @@ const Navbar = () => {
                 >
                   요금제
                 </Link>
-                <button 
-                  onClick={handleLogout}
-                  className="block w-full text-left px-3 py-2 text-gray-700 hover:text-primary-600"
-                >
-                  로그아웃
-                </button>
+                {!user.isGuest && (
+                  <button 
+                    onClick={handleLogout}
+                    className="block w-full text-left px-3 py-2 text-gray-700 hover:text-primary-600"
+                  >
+                    로그아웃
+                  </button>
+                )}
               </>
             ) : (
               <>

@@ -93,4 +93,60 @@ export const searchPlacesByCategory = async (categoryCode, params) => {
   }
 };
 
+// AI 질의 로깅 API
+export const logAIQuery = async (queryData) => {
+  try {
+    const response = await api.post('/ai-query-logs/log', queryData);
+    return response.data;
+  } catch (error) {
+    console.error('AI 질의 로깅 실패:', error);
+    // 로깅 실패가 서비스에 영향을 주지 않도록 에러를 던지지 않음
+    return null;
+  }
+};
+
+// AI 질의 피드백 업데이트 API
+export const updateAIQueryFeedback = async (logId, feedback) => {
+  try {
+    const response = await api.patch(`/ai-query-logs/feedback/${logId}`, feedback);
+    return response.data;
+  } catch (error) {
+    console.error('AI 질의 피드백 업데이트 실패:', error);
+    throw error;
+  }
+};
+
+// 관리자용 AI 질의 로그 조회 API
+export const getAIQueryLogs = async (params = {}) => {
+  try {
+    const response = await api.get('/ai-query-logs/admin/logs', { params });
+    return response.data;
+  } catch (error) {
+    console.error('AI 질의 로그 조회 실패:', error);
+    throw error;
+  }
+};
+
+// 관리자용 AI 질의 통계 조회 API
+export const getAIQueryStats = async (params = {}) => {
+  try {
+    const response = await api.get('/ai-query-logs/admin/stats', { params });
+    return response.data;
+  } catch (error) {
+    console.error('AI 질의 통계 조회 실패:', error);
+    throw error;
+  }
+};
+
+// 관리자용 자주 묻는 질문 분석 API
+export const getFrequentQueries = async (params = {}) => {
+  try {
+    const response = await api.get('/ai-query-logs/admin/frequent-queries', { params });
+    return response.data;
+  } catch (error) {
+    console.error('자주 묻는 질문 분석 실패:', error);
+    throw error;
+  }
+};
+
 export default api; 

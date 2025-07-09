@@ -46,7 +46,7 @@ export const AuthProvider = ({ children }) => {
     
     const guestUser = {
       id: session.id,
-      name: session.isRestored ? '게스트 사용자 (복원됨)' : '게스트 사용자',
+      name: session.isRestored ? '게스트 사용자' : '게스트 사용자',
       email: '',
       subscription: 'guest', // 명확한 구분을 위해 'guest'로 설정
       isGuest: true,
@@ -59,7 +59,6 @@ export const AuthProvider = ({ children }) => {
     
     if (session.isRestored) {
       console.log('게스트 세션 복원:', session.id);
-      toast.success('이전 세션이 복원되었습니다', { duration: 2000 });
     } else {
       console.log('새 게스트 세션 생성:', session.id);
     }

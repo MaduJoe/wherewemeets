@@ -4,6 +4,7 @@ const jwt = require('jsonwebtoken');
 const { auth } = require('../middleware/auth');
 const { requirePremium } = require('../middleware/subscription');
 const User = require('../models/User');
+const AIQueryLog = require('../models/AIQueryLog');
 const router = express.Router();
 
 // 여러 개의 Gemini API 키 설정 (환경변수에서 콤마로 구분된 키들을 읽음)
@@ -161,6 +162,101 @@ function getApiKeyRotationInfo() {
     totalDailyUsage: keyUsages.reduce((sum, key) => sum + key.usage, 0),
     maxDailyCapacity: GEMINI_API_KEYS.length * 100
   };
+}
+
+// AI 질의 로깅을 위한 헬퍼 함수
+async function logAIQuery(queryData) {
+  try {
+    const logData = {
+      userId: queryData.userId || 'anonymous',
+      userType: queryData.userType || 'guest',
+      sessionId: queryData.sessionId || 'unknown',
+      query: queryData.query,
+      queryType: queryData.queryType,
+      context: queryData.context || {},
+      response: queryData.response,
+      responseTime: queryData.responseTime || 0,
+      aiModel: queryData.aiModel || 'gpt-3.5-turbo',
+      success: queryData.success !== false,
+      errorMessage: queryData.errorMessage,
+      tokenUsed: queryData.tokenUsed,
+      sentiment: queryData.sentiment,
+      category: queryData.category,
+      tags: queryData.tags || [],
+      ipAddress: queryData.ipAddress,
+      userAgent: queryData.userAgent,
+      platform: 'web'
+    };
+
+    const aiQueryLog = new AIQueryLog(logData);
+    await aiQueryLog.save();
+    
+    console.log('✅ AI 질의 로그 저장 완료:', {
+      userId: logData.userId,
+      queryType: logData.queryType,
+      success: logData.success
+    });
+
+    return aiQueryLog._id;
+  } catch (error) {
+    console.error('❌ AI 질의 로그 저장 실패:', error);
+    // 로깅 실패가 서비스에 영향을 주지 않도록 에러를 던지지 않음
+    return null;
+  }
+}
+
+// 사용자 정보를 추출하는 헬퍼 함수
+async function extractUserInfo(req) {
+  let user = null;
+  let isGuest = true;
+  let userId = 'anonymous';
+  let userType = 'guest';
+  
+  const authHeader = req.headers.authorization;
+  if (authHeader && authHeader.startsWith('Bearer ')) {
+    try {
+      const token = authHeader.substring(7);
+      const decoded = jwt.verify(token, process.env.JWT_SECRET);
+      user = await User.findById(decoded.userId);
+      if (user) {
+        isGuest = false;
+        userId = user._id.toString();
+        userType = user.subscription === 'premium' ? 'premium' : 'member';
+      }
+    } catch (error) {
+      // 토큰 검증 실패 시 게스트로 처리
+    }
+  }
+  
+  // 게스트 사용자의 경우 세션 ID 사용
+  if (isGuest) {
+    userId = req.headers['x-session-id'] || req.ip || 'anonymous';
+  }
+  
+  return { user, isGuest, userId, userType };
+}
+
+// 질의 카테고리를 자동으로 분류하는 함수
+function categorizeQuery(message, queryType) {
+  const keywords = {
+    place_food: ['맛집', '음식점', '레스토랑', '카페', '커피', '분식', '치킨', '피자', '햄버거', '한식', '중식', '일식', '양식'],
+    place_activity: ['놀', '활동', '체험', '볼링', '노래방', 'pc방', '영화', '공연', '전시', '박물관', '놀이'],
+    place_outdoor: ['공원', '산책', '피크닉', '등산', '강변', '해변', '야외', '자연'],
+    place_shopping: ['쇼핑', '백화점', '마트', '시장', '아울렛', '쇼핑몰'],
+    meeting_planning: ['언제', '시간', '일정', '스케줄', '계획'],
+    general_question: ['어떻게', '왜', '뭐', '무엇', '어디서', '누구'],
+    transport: ['교통', '지하철', '버스', '택시', '주차', '길', '경로']
+  };
+  
+  const lowerMessage = message.toLowerCase();
+  
+  for (const [category, keywordList] of Object.entries(keywords)) {
+    if (keywordList.some(keyword => lowerMessage.includes(keyword))) {
+      return category;
+    }
+  }
+  
+  return queryType === 'place_recommendation' ? 'place_general' : 'general';
 }
 
 // API 사용량 추적을 위한 전역 카운터 (호환성을 위해 유지)
@@ -1437,6 +1533,43 @@ ${fallbackPlacesText}
       }
     }
 
+    // AI 질의 로깅
+    try {
+      const userInfo = await extractUserInfo(req);
+      const category = categorizeQuery(message, isPlaceRecommendation ? 'place_recommendation' : 'chat_assistance');
+      
+      await logAIQuery({
+        userId: userInfo.userId,
+        userType: userInfo.userType,
+        sessionId: sessionId,
+        query: message,
+        queryType: isPlaceRecommendation ? 'place_recommendation' : 'chat_assistance',
+        context: {
+          meetingId: context?.meetingId,
+          location: context?.location,
+          preferences: context?.preferences,
+          conversationHistory: context?.conversationHistory?.slice(-3), // 최근 3개만 저장
+          isPlaceRecommendation: isPlaceRecommendation,
+          usedKeywordFallback: usedKeywordFallback
+        },
+        response: aiResponse,
+        responseTime: Date.now() - (req.startTime || Date.now()),
+        aiModel: 'gemini-pro',
+        success: true,
+        category: category,
+        tags: [
+          isPlaceRecommendation ? 'place_recommendation' : 'general_chat',
+          usedKeywordFallback ? 'keyword_fallback' : 'ai_direct',
+          verifiedPlaces.length > 0 ? 'verified_places' : 'unverified'
+        ],
+        ipAddress: req.ip || req.connection.remoteAddress,
+        userAgent: req.get('User-Agent')
+      });
+    } catch (loggingError) {
+      console.error('⚠️ AI 질의 로깅 실패:', loggingError);
+      // 로깅 실패는 서비스에 영향을 주지 않음
+    }
+
     // 응답에 API 사용량 정보 추가
     const finalApiUsageInfo = getApiUsageInfo();
     
@@ -1468,6 +1601,32 @@ ${fallbackPlacesText}
     console.error('AI 도우미 에러:', error);
     console.error('상세 에러 정보:', error.response?.data || error.message);
     console.error('스택 트레이스:', error.stack);
+
+    // 에러 상황 AI 질의 로깅
+    try {
+      const userInfo = await extractUserInfo(req);
+      const category = categorizeQuery(message || '', 'chat_assistance');
+      
+      await logAIQuery({
+        userId: userInfo.userId,
+        userType: userInfo.userType,
+        sessionId: req.headers['x-session-id'] || req.ip || 'unknown',
+        query: message || '',
+        queryType: 'chat_assistance',
+        context: context || {},
+        response: `에러 발생: ${error.message}`,
+        responseTime: Date.now() - (req.startTime || Date.now()),
+        aiModel: 'gemini-pro',
+        success: false,
+        errorMessage: error.message,
+        category: category,
+        tags: ['error', error.response?.status?.toString() || 'unknown_error'],
+        ipAddress: req.ip || req.connection.remoteAddress,
+        userAgent: req.get('User-Agent')
+      });
+    } catch (loggingError) {
+      console.error('⚠️ 에러 상황 AI 질의 로깅 실패:', loggingError);
+    }
     
     // Timeout 에러 처리
     if (error.code === 'ECONNABORTED' || error.message.includes('timeout')) {
@@ -1832,6 +1991,41 @@ router.post('/recommend-places', async (req, res) => {
       }
     }
 
+    // AI 질의 로깅
+    try {
+      const userInfo = await extractUserInfo(req);
+      const category = categorizeQuery(message, 'place_recommendation');
+      
+      await logAIQuery({
+        userId: userInfo.userId,
+        userType: userInfo.userType,
+        sessionId: sessionId,
+        query: message,
+        queryType: 'place_recommendation',
+        context: {
+          preferences: preferences,
+          location: preferences.location,
+          budget: preferences.budget,
+          purpose: preferences.purpose,
+          category: preferences.category
+        },
+        response: aiResponse,
+        responseTime: Date.now() - (req.startTime || Date.now()),
+        aiModel: 'gemini-pro',
+        success: true,
+        category: category,
+        tags: [
+          'place_recommendation',
+          'structured_preferences',
+          preferences.category || 'general'
+        ],
+        ipAddress: req.ip || req.connection.remoteAddress,
+        userAgent: req.get('User-Agent')
+      });
+    } catch (loggingError) {
+      console.error('⚠️ AI 질의 로깅 실패:', loggingError);
+    }
+
     // 응답 형식을 기존 프론트엔드와 호환되도록 변환
     res.json({
       success: true,
@@ -1850,6 +2044,32 @@ router.post('/recommend-places', async (req, res) => {
 
   } catch (error) {
     console.error('AI 장소 추천 에러:', error.response?.data || error.message);
+
+    // 에러 상황 AI 질의 로깅
+    try {
+      const userInfo = await extractUserInfo(req);
+      const category = categorizeQuery(message || '', 'place_recommendation');
+      
+      await logAIQuery({
+        userId: userInfo.userId,
+        userType: userInfo.userType,
+        sessionId: req.headers['x-session-id'] || req.ip || 'unknown',
+        query: message || '',
+        queryType: 'place_recommendation',
+        context: preferences || {},
+        response: `에러 발생: ${error.message}`,
+        responseTime: Date.now() - (req.startTime || Date.now()),
+        aiModel: 'gemini-pro',
+        success: false,
+        errorMessage: error.message,
+        category: category,
+        tags: ['error', 'place_recommendation', error.response?.status?.toString() || 'unknown_error'],
+        ipAddress: req.ip || req.connection.remoteAddress,
+        userAgent: req.get('User-Agent')
+      });
+    } catch (loggingError) {
+      console.error('⚠️ 에러 상황 AI 질의 로깅 실패:', loggingError);
+    }
     
     // 503 (Service Unavailable) 에러 처리 - Gemini 모델 과부하
     if (error.response?.status === 503) {

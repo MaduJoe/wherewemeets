@@ -21,6 +21,7 @@ import MeetingPlannerPage from './pages/MeetingPlannerPage';
 import ProfilePage from './pages/ProfilePage';
 import PricingPage from './pages/PricingPage';
 import DateTestPage from './pages/DateTestPage';
+import AdminAIAnalyticsPage from './pages/AdminAIAnalyticsPage';
 
 // Stripe 설정
 const stripePromise = loadStripe(
@@ -71,6 +72,7 @@ const AppContent = () => {
             <Route path="/profile" element={<ProfilePage />} />
             <Route path="/pricing" element={<PricingPage />} />
             <Route path="/date-test" element={<DateTestPage />} />
+            <Route path="/admin/ai-analytics" element={<AdminAIAnalyticsPage />} />
             <Route path="*" element={<Navigate to="/" />} />
           </Routes>
         </main>

@@ -2,7 +2,6 @@ import React, { useState, useLayoutEffect } from 'react';
 import { Link } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
 import SmartInfoCollector from '../components/SmartInfoCollector';
-import PremiumFeatures from '../components/PremiumFeatures';
 import { 
   RocketLaunchIcon,
   SparklesIcon,
@@ -105,7 +104,8 @@ const HomePage = () => {
                   </Link>
                   <Link
                     to="/register"
-                    className="text-gray-600 hover:text-primary-600 px-6 py-3 rounded-full font-medium transition duration-200"
+                    className="bg-white text-primary-600 border-2 border-primary-600 px-6 py-3 rounded-full font-semibold hover:bg-primary-50 transition duration-200 transform hover:scale-105 shadow-md"
+
                   >
                     회원가입
                   </Link>
@@ -247,7 +247,7 @@ const HomePage = () => {
         </div>
       </section>
 
-      {/* 차별화 포인트 */}
+      {/* 차별화 포인트 & 사용자 후기 통합 섹션 */}
       <section className="py-20 bg-gray-50">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
           <div className="text-center mb-16">
@@ -256,148 +256,110 @@ const HomePage = () => {
             </h2>
           </div>
 
-          <div className="grid grid-cols-1 lg:grid-cols-2 gap-12 items-center">
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-12 items-start">
+            {/* 차별화 포인트 */}
             <div>
+              <h3 className="text-2xl font-bold text-gray-900 mb-8 text-center">
+                차별화 포인트
+              </h3>
               <div className="space-y-6">
-                <div className="flex items-start">
-                  <div className="bg-red-100 p-2 rounded-lg mr-4">
-                    <div className="text-red-600 font-bold">vs</div>
+                <div className="bg-red-50 p-6 rounded-2xl border border-red-200 flex items-start">
+                  <div className="bg-red-100 p-3 rounded-lg mr-4 flex-shrink-0">
+                    <div className="text-red-600 font-bold text-lg">vs</div>
                   </div>
                   <div>
-                    <h4 className="font-semibold text-gray-900 mb-2">기존 앱: "어디서 만날까?"</h4>
-                    <p className="text-gray-600 text-sm">단순히 중간 지점만 찾아주는 정보 전달 중심</p>
+                    <h4 className="font-semibold text-gray-900 mb-3 text-lg">기존 앱: "어디서 만날까?"</h4>
+                    <p className="text-gray-600">단순히 중간 지점만 찾아주는 정보 전달 중심</p>
                   </div>
                 </div>
 
-                <div className="flex items-start">
-                  <div className="bg-green-100 p-2 rounded-lg mr-4">
-                    <div className="text-green-600 font-bold">✓</div>
+                <div className="bg-green-50 p-6 rounded-2xl border border-green-200 flex items-start">
+                  <div className="bg-green-100 p-3 rounded-lg mr-4 flex-shrink-0">
+                    <div className="text-green-600 font-bold text-lg">✓</div>
                   </div>
                   <div>
-                    <h4 className="font-semibold text-gray-900 mb-2">WhereWeMeets: "어떻게 공정하게 결정할까?"</h4>
-                    <p className="text-gray-600 text-sm">감정과 협업을 중시하는 의사결정 플랫폼</p>
+                    <h4 className="font-semibold text-gray-900 mb-3 text-lg">WhereWeMeets: "어떻게 공정하게 결정할까?"</h4>
+                    <p className="text-gray-600">감정과 협업을 중시하는 의사결정 플랫폼</p>
                   </div>
                 </div>
 
-                <div className="bg-gradient-to-r from-primary-50 to-secondary-50 p-6 rounded-lg border-l-4 border-primary-500">
-                  <h5 className="font-semibold text-gray-900 mb-2 flex items-center">
-                    <LightBulbIcon className="h-5 w-5 mr-2 text-primary-600" />
+                <div className="bg-gradient-to-r from-primary-50 to-secondary-50 p-8 rounded-2xl border border-primary-200">
+                  <h5 className="font-semibold text-gray-900 mb-4 flex items-center text-lg">
+                    <LightBulbIcon className="h-6 w-6 mr-3 text-primary-600" />
                     핵심 차별점
                   </h5>
-                  <ul className="text-sm text-gray-700 space-y-1">
-                    <li>• 🤖 자연어 대화로 AI가 니즈 파악</li>
-                    <li>• 😊 감정 반응으로 진짜 선호도 확인</li>
-                    <li>• ⚖️ 공정성 알고리즘으로 모든 친구 배려</li>
-                    <li>• 💬 실시간 채팅으로 소통하며 결정</li>
+                  <ul className="text-gray-700 space-y-2">
+                    <li className="flex items-center">
+                      <span className="mr-3">🤖</span>
+                      <span>자연어 대화로 AI가 니즈 파악</span>
+                    </li>
+                    <li className="flex items-center">
+                      <span className="mr-3">😊</span>
+                      <span>감정 반응으로 진짜 선호도 확인</span>
+                    </li>
+                    <li className="flex items-center">
+                      <span className="mr-3">⚖️</span>
+                      <span>공정성 알고리즘으로 모든 친구 배려</span>
+                    </li>
+                    <li className="flex items-center">
+                      <span className="mr-3">💬</span>
+                      <span>실시간 채팅으로 소통하며 결정</span>
+                    </li>
                   </ul>
                 </div>
               </div>
             </div>
 
-            <div className="bg-white rounded-2xl shadow-xl p-8 border">
-              <h4 className="text-xl font-bold text-gray-900 mb-6 text-center">
-                🎯 로그인 없이 바로 체험하세요!
-              </h4>
-              
-              <div className="space-y-4">
-                <Link
-                  to="/meeting-planner"
-                  className="block w-full bg-gradient-to-r from-primary-600 to-secondary-600 text-white py-3 px-6 rounded-lg text-center font-medium hover:from-primary-700 hover:to-secondary-700 transition duration-200"
-                >
-                  🚀 AI 추천 체험하기
-                </Link>
-                
-                <Link
-                  to="/create-meeting"
-                  className="block w-full bg-gray-100 text-gray-700 py-3 px-6 rounded-lg text-center font-medium hover:bg-gray-200 transition duration-200"
-                >
-                  📅 미팅 만들기
-                </Link>
-                
-                <button
-                  onClick={() => {
-                    setCollectorTrigger('save-results');
-                    setShowInfoCollector(true);
-                  }}
-                  className="block w-full bg-yellow-100 text-yellow-800 py-3 px-6 rounded-lg text-center font-medium hover:bg-yellow-200 transition duration-200"
-                >
-                  💾 결과 저장하고 공유하기
-                </button>
-              </div>
-
-              <div className="mt-6 text-center text-sm text-gray-500">
-                {userAnalytics.visitCount > 1 && (
-                  <div className="bg-blue-50 p-3 rounded-lg mb-3">
-                    <div className="text-blue-800 font-medium">환영합니다! 🎉</div>
-                    <div className="text-blue-600">
-                      {userAnalytics.visitCount}번째 방문을 축하합니다
+            {/* 사용자 후기 */}
+            <div>
+              <h3 className="text-2xl font-bold text-gray-900 mb-8 text-center">
+                사용자들의 생생한 후기
+              </h3>
+              <div className="space-y-6">
+                <div className="bg-blue-50 p-6 rounded-2xl border border-blue-200">
+                  <div className="flex items-center mb-4">
+                    <div className="text-2xl mr-3">🙋‍♀️</div>
+                    <div>
+                      <h4 className="font-semibold">이수진님</h4>
+                      <div className="text-yellow-400">★★★★★</div>
                     </div>
                   </div>
-                )}
-                계정 생성 없이 모든 기능을 사용할 수 있어요
+                  <p className="text-gray-700 text-sm">
+                    "드디어 친구들과 만날 때 '어디서 만날까' 고민이 사라졌어요! 
+                    AI가 대화만으로 우리가 원하는 걸 정확히 파악해서 놀랍네요."
+                  </p>
+                </div>
+
+                <div className="bg-green-50 p-6 rounded-2xl border border-green-200">
+                  <div className="flex items-center mb-4">
+                    <div className="text-2xl mr-3">🙋‍♂️</div>
+                    <div>
+                      <h4 className="font-semibold">박현우님</h4>
+                      <div className="text-yellow-400">★★★★★</div>
+                    </div>
+                  </div>
+                  <p className="text-gray-700 text-sm">
+                    "공정성 알고리즘이 정말 좋아요. 항상 같은 사람만 선정되던 문제가 해결됐고, 
+                    모든 친구들이 만족하는 결과가 나와요!"
+                  </p>
+                </div>
+
+                <div className="bg-purple-50 p-6 rounded-2xl border border-purple-200">
+                  <div className="flex items-center mb-4">
+                    <div className="text-2xl mr-3">👨‍💼</div>
+                    <div>
+                      <h4 className="font-semibold">김대리님</h4>
+                      <div className="text-yellow-400">★★★★★</div>
+                    </div>
+                  </div>
+                  <p className="text-gray-700 text-sm">
+                    "회사 동료들과의 회식 장소 정하기가 이렇게 쉬울 줄 몰랐어요. 
+                    감정 반응 시스템으로 다들 진짜 원하는 곳을 알 수 있어서 좋네요."
+                  </p>
+                </div>
               </div>
             </div>
           </div>
-        </div>
-      </section>
-
-      {/* 사용자 후기 섹션 */}
-      <section className="py-20 bg-white">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-          <h2 className="text-3xl font-bold text-center text-gray-900 mb-16">
-            사용자들의 생생한 후기
-          </h2>
-          
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-8">
-            <div className="bg-blue-50 p-6 rounded-2xl border border-blue-200">
-              <div className="flex items-center mb-4">
-                <div className="text-2xl mr-3">🙋‍♀️</div>
-                <div>
-                  <h4 className="font-semibold">이수진님</h4>
-                  <div className="text-yellow-400">★★★★★</div>
-                </div>
-              </div>
-              <p className="text-gray-700 text-sm">
-                "드디어 친구들과 만날 때 '어디서 만날까' 고민이 사라졌어요! 
-                AI가 대화만으로 우리가 원하는 걸 정확히 파악해서 놀랍네요."
-              </p>
-            </div>
-
-            <div className="bg-green-50 p-6 rounded-2xl border border-green-200">
-              <div className="flex items-center mb-4">
-                <div className="text-2xl mr-3">🙋‍♂️</div>
-                <div>
-                  <h4 className="font-semibold">박현우님</h4>
-                  <div className="text-yellow-400">★★★★★</div>
-                </div>
-              </div>
-              <p className="text-gray-700 text-sm">
-                "공정성 알고리즘이 정말 좋아요. 항상 같은 사람만 선정되던 문제가 해결됐고, 
-                모든 친구들이 만족하는 결과가 나와요!"
-              </p>
-            </div>
-
-            <div className="bg-purple-50 p-6 rounded-2xl border border-purple-200">
-              <div className="flex items-center mb-4">
-                <div className="text-2xl mr-3">👨‍💼</div>
-                <div>
-                  <h4 className="font-semibold">김대리님</h4>
-                  <div className="text-yellow-400">★★★★★</div>
-                </div>
-              </div>
-              <p className="text-gray-700 text-sm">
-                "회사 동료들과의 회식 장소 정하기가 이렇게 쉬울 줄 몰랐어요. 
-                감정 반응 시스템으로 다들 진짜 원하는 곳을 알 수 있어서 좋네요."
-              </p>
-            </div>
-          </div>
-        </div>
-      </section>
-
-      {/* 프리미엄 기능 섹션 */}
-      <section className="py-20 bg-gray-50">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-          <PremiumFeatures />
         </div>
       </section>
 
@@ -421,15 +383,12 @@ const HomePage = () => {
                 : '무료로 시작하기 🚀'
               }
             </Link>
-            <button
-              onClick={() => {
-                setCollectorTrigger('premium-features');
-                setShowInfoCollector(true);
-              }}
+            <Link
+              to="/register"
               className="border-2 border-white text-white px-8 py-4 rounded-full text-lg font-semibold hover:bg-white hover:text-primary-600 transition duration-200"
             >
               프리미엄 기능 체험 ⭐
-            </button>
+            </Link>
           </div>
         </div>
       </section>
