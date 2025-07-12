@@ -1,0 +1,89 @@
+# 프로젝트 수정 및 반영 내용 요약 (2025-07-12)
+
+## 해결한 문제들
+
+### 1. 포트 충돌 오류 (EADDRINUSE)
+**문제**: 포트 5000이 이미 사용 중이라는 오류 발생
+- 오류 메시지: "Error: listen EADDRINUSE: address already in use :::5000"
+- 원인: 다른 터미널에서 서버가 이미 실행 중이었음
+- 해결: 기존 프로세스 종료 후 재실행
+
+### 2. 토스페이먼츠 SDK 모듈 오류
+**문제**: "@tosspayments/tosspayments-sdk" 모듈을 찾을 수 없음
+- 오류 메시지: "Module not found: Error: Can't resolve '@tosspayments/tosspayments-sdk'"
+- 원인: 패키지 설치 상태 불완전
+- 해결: 클라이언트 폴더에서 `npm install` 재실행
+
+### 3. 토스페이먼츠 결제 시스템 초기화 오류 ⭐ 주요 해결 사항
+**문제**: /pricing 페이지에서 "이 플랜 선택" 버튼 클릭시 "결제 시스템을 초기화하는 중입니다. 잠시 후 다시 시도해주세요." 팝업 발생
+
+**원인 분석**:
+- PricingPage.js에서 `process.env.REACT_APP_TOSS_CLIENT_KEY` 사용
+- 클라이언트 폴더의 .env 파일에 해당 환경 변수 누락
+- React 앱에서 환경 변수 사용 시 `REACT_APP_` 접두사 필요
+
+**해결 과정**:
+1. 클라이언트 폴더 .env 파일 확인
+   - 기존 내용: API URL, Stripe 키, 환경 설정만 존재
+   - 토스페이먼츠 관련 환경 변수 부재
+
+2. 루트 폴더 .env 파일에서 토스페이먼츠 키 확인
+   - TOSS_CLIENT_KEY=test_gck_docs_Ovk5rk1EwkEbP0W43n07xlzm
+   - REACT_APP_TOSS_CLIENT_KEY=test_gck_docs_Ovk5rk1EwkEbP0W43n07xlzm
+
+3. 클라이언트 폴더 .env 파일에 토스페이먼츠 키 추가
+   - `REACT_APP_TOSS_CLIENT_KEY=test_gck_docs_Ovk5rk1EwkEbP0W43n07xlzm` 추가
+
+## 수정된 파일들
+
+### client/.env
+**수정 내용**: 토스페이먼츠 클라이언트 키 추가
+```
+REACT_APP_TOSS_CLIENT_KEY=test_gck_docs_Ovk5rk1EwkEbP0W43n07xlzm
+```
+
+## 확인된 파일 구조
+
+### 환경 변수 파일 위치
+- 루트 폴더: `/wherewemeets/.env` (서버용 환경 변수)
+- 클라이언트 폴더: `/wherewemeets/client/.env` (React 앱용 환경 변수)
+
+### 토스페이먼츠 관련 코드
+- **PricingPage.js**: 토스페이먼츠 SDK 초기화 및 결제 위젯 구현
+- **환경 변수 사용**: `process.env.REACT_APP_TOSS_CLIENT_KEY`
+
+## 현재 상태
+
+### 해결 완료
+✅ 포트 충돌 오류 해결
+✅ 토스페이먼츠 SDK 모듈 오류 해결  
+✅ 토스페이먼츠 결제 시스템 초기화 오류 해결
+
+### 필요한 후속 작업
+- React 개발 서버 재시작 (환경 변수 적용을 위해)
+- /pricing 페이지에서 결제 기능 테스트
+
+## 기술적 세부사항
+
+### 토스페이먼츠 SDK 설정
+- 클라이언트 키: `test_gck_docs_Ovk5rk1EwkEbP0W43n07xlzm` (테스트용)
+- 서버 키: `test_gsk_docs_OaPz8L5KdmQXkzRz3y47BMw6` (테스트용)
+
+### 결제 플랜 구조
+- **Premium**: 9,900원/월 (무제한 미팅 생성, 고급 장소 추천, 이메일 알림)
+- **Pro**: 19,900원/월 (모든 Premium 기능 + 팀 관리, 분석 리포트, 우선 고객지원)
+
+### 결제 흐름
+1. 플랜 선택 → 토스페이먼츠 위젯 초기화
+2. 결제 방법 선택 → 이용약관 동의
+3. 결제 실행 → 성공/실패 페이지 리다이렉트
+
+## 학습한 포인트
+- React 앱에서 환경 변수 사용 시 `REACT_APP_` 접두사 필수
+- 클라이언트와 서버의 환경 변수 파일 분리 필요
+- 토스페이먼츠 SDK 초기화 시 클라이언트 키 필수
+
+## 마지막 업데이트
+- 날짜: 2025-07-12
+- 작업자: AI Assistant
+- 상태: 결제 시스템 초기화 오류 해결 완료 

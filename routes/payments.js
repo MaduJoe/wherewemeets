@@ -1,5 +1,4 @@
 const express = require('express');
-const stripe = require('stripe')(process.env.STRIPE_SECRET_KEY);
 const { auth } = require('../middleware/auth');
 const User = require('../models/User');
 
@@ -19,7 +18,59 @@ const PLANS = {
   }
 };
 
-// 결제 인텐트 생성
+// 토스페이먼츠 결제 승인
+router.post('/toss/confirm', auth, async (req, res) => {
+  try {
+    const { paymentKey, orderId, amount, plan } = req.body;
+    
+    if (!PLANS[plan]) {
+      return res.status(400).json({ message: '유효하지 않은 플랜입니다.' });
+    }
+
+    // 토스페이먼츠 결제 승인 요청
+    const tossResponse = await fetch('https://api.tosspayments.com/v1/payments/confirm', {
+      method: 'POST',
+      headers: {
+        'Authorization': `Basic ${Buffer.from(process.env.TOSS_SECRET_KEY + ':').toString('base64')}`,
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({
+        paymentKey,
+        orderId,
+        amount
+      })
+    });
+
+    const payment = await tossResponse.json();
+
+    if (tossResponse.ok && payment.status === 'DONE') {
+      // 결제 성공 - 구독 정보 업데이트
+      const user = await User.findById(req.userId);
+      user.subscription = plan;
+      user.subscriptionEndDate = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000); // 30일
+      await user.save();
+
+      res.json({ 
+        success: true,
+        message: '결제가 완료되었습니다.',
+        subscription: {
+          plan: user.subscription,
+          endDate: user.subscriptionEndDate
+        }
+      });
+    } else {
+      console.error('토스페이먼츠 결제 실패:', payment);
+      res.status(400).json({ 
+        error: payment.message || '결제 처리 중 오류가 발생했습니다.' 
+      });
+    }
+  } catch (error) {
+    console.error('Payment confirmation error:', error);
+    res.status(500).json({ error: '서버 오류가 발생했습니다.' });
+  }
+});
+
+// 결제 인텐트 생성 (기존 Stripe 코드 - 호환성을 위해 유지)
 router.post('/create-payment-intent', auth, async (req, res) => {
   try {
     const { plan } = req.body;
@@ -33,51 +84,18 @@ router.post('/create-payment-intent', auth, async (req, res) => {
       return res.status(404).json({ message: '사용자를 찾을 수 없습니다.' });
     }
 
-    // Stripe Payment Intent 생성
-    const paymentIntent = await stripe.paymentIntents.create({
-      amount: PLANS[plan].price,
-      currency: 'krw',
-      metadata: {
-        userId: user._id.toString(),
-        plan: plan
-      }
-    });
-
-    res.json({
-      clientSecret: paymentIntent.client_secret,
-      plan: PLANS[plan]
-    });
+    // Stripe Payment Intent 생성 (더 이상 사용되지 않음)
+    res.status(400).json({ message: 'Stripe 결제는 더 이상 지원되지 않습니다. 토스페이먼츠를 사용해주세요.' });
   } catch (error) {
     console.error('Payment intent creation error:', error);
     res.status(500).json({ message: '결제 처리 중 오류가 발생했습니다.' });
   }
 });
 
-// 결제 성공 처리
+// 결제 성공 처리 (기존 Stripe 코드 - 호환성을 위해 유지)
 router.post('/confirm-payment', auth, async (req, res) => {
   try {
-    const { paymentIntentId, plan } = req.body;
-
-    // Stripe에서 결제 확인
-    const paymentIntent = await stripe.paymentIntents.retrieve(paymentIntentId);
-    
-    if (paymentIntent.status !== 'succeeded') {
-      return res.status(400).json({ message: '결제가 완료되지 않았습니다.' });
-    }
-
-    // 사용자 구독 업데이트
-    const user = await User.findById(req.userId);
-    user.subscription = plan;
-    user.subscriptionEndDate = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000); // 30일
-    await user.save();
-
-    res.json({ 
-      message: '구독이 성공적으로 활성화되었습니다.',
-      subscription: {
-        plan: user.subscription,
-        endDate: user.subscriptionEndDate
-      }
-    });
+    res.status(400).json({ message: 'Stripe 결제는 더 이상 지원되지 않습니다. 토스페이먼츠를 사용해주세요.' });
   } catch (error) {
     console.error('Payment confirmation error:', error);
     res.status(500).json({ message: '결제 확인 중 오류가 발생했습니다.' });

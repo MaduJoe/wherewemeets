@@ -14,6 +14,9 @@ const AdminAIAnalyticsPage = () => {
   const [frequentQueries, setFrequentQueries] = useState([]);
   const [pagination, setPagination] = useState(null);
   
+  // 자주 묻는 질문 정렬 상태
+  const [frequentQueriesSortBy, setFrequentQueriesSortBy] = useState('frequency');
+  
   // 필터 상태
   const [filters, setFilters] = useState({
     queryType: '',
@@ -35,7 +38,7 @@ const AdminAIAnalyticsPage = () => {
     }
     
     loadData();
-  }, [user, filters, activeTab]);
+  }, [user, filters, activeTab, frequentQueriesSortBy]);
 
   const loadData = async () => {
     try {
@@ -47,7 +50,7 @@ const AdminAIAnalyticsPage = () => {
             startDate: filters.startDate,
             endDate: filters.endDate
           }),
-          getFrequentQueries({ limit: 20, days: 30 })
+          getFrequentQueries({ limit: 20, days: 30, sortBy: frequentQueriesSortBy })
         ]);
         
         setStats(statsResult.data);
@@ -56,6 +59,13 @@ const AdminAIAnalyticsPage = () => {
         const logsResult = await getAIQueryLogs(filters);
         setLogs(logsResult.data.logs);
         setPagination(logsResult.data.pagination);
+      } else if (activeTab === 'frequent') {
+        const frequentQueriesResult = await getFrequentQueries({ 
+          limit: 50, 
+          days: 30, 
+          sortBy: frequentQueriesSortBy 
+        });
+        setFrequentQueries(frequentQueriesResult.data);
       }
       
     } catch (error) {
@@ -238,7 +248,7 @@ const AdminAIAnalyticsPage = () => {
             {/* 필터 */}
             <div className="bg-white p-6 rounded-lg shadow">
               <h3 className="text-lg font-semibold mb-4">필터</h3>
-              <div className="grid grid-cols-1 md:grid-cols-3 lg:grid-cols-6 gap-4">
+              <div className="grid grid-cols-1 md:grid-cols-3 lg:grid-cols-5 gap-4">
                 <select
                   value={filters.queryType}
                   onChange={(e) => handleFilterChange('queryType', e.target.value)}
@@ -283,14 +293,6 @@ const AdminAIAnalyticsPage = () => {
                   type="date"
                   value={filters.endDate}
                   onChange={(e) => handleFilterChange('endDate', e.target.value)}
-                  className="border border-gray-300 rounded-md px-3 py-2"
-                />
-                
-                <input
-                  type="text"
-                  placeholder="검색..."
-                  value={filters.search}
-                  onChange={(e) => handleFilterChange('search', e.target.value)}
                   className="border border-gray-300 rounded-md px-3 py-2"
                 />
               </div>
@@ -384,27 +386,71 @@ const AdminAIAnalyticsPage = () => {
 
         {/* 자주 묻는 질문 탭 */}
         {activeTab === 'frequent' && (
-          <div className="bg-white p-6 rounded-lg shadow">
-            <h3 className="text-lg font-semibold mb-4">자주 묻는 질문 (최근 30일)</h3>
-            <div className="space-y-4">
-              {frequentQueries.map((query, index) => (
-                <div key={index} className="border border-gray-200 rounded-lg p-4">
-                  <div className="flex justify-between items-start mb-2">
-                    <h4 className="font-medium text-gray-900 flex-1 mr-4">
-                      {query.query}
-                    </h4>
-                    <div className="flex space-x-4 text-sm text-gray-600">
-                      <span>{query.count}회</span>
-                      {query.avgRating && <span>⭐ {query.avgRating}</span>}
-                    </div>
-                  </div>
-                  <div className="flex justify-between text-sm text-gray-500">
-                    <span>유형: {query.queryType}</span>
-                    <span>평균 응답시간: {formatResponseTime(query.avgResponseTime)}</span>
-                    <span>마지막 질의: {formatDate(query.lastAsked)}</span>
-                  </div>
+          <div className="space-y-6">
+            {/* 정렬 옵션 */}
+            <div className="bg-white p-6 rounded-lg shadow">
+              <div className="flex justify-between items-center mb-4">
+                <h3 className="text-lg font-semibold">자주 묻는 질문 (최근 30일)</h3>
+                <div className="flex items-center space-x-4">
+                  <label htmlFor="sort-select" className="text-sm font-medium text-gray-700">
+                    정렬 기준:
+                  </label>
+                  <select
+                    id="sort-select"
+                    value={frequentQueriesSortBy}
+                    onChange={(e) => setFrequentQueriesSortBy(e.target.value)}
+                    className="border border-gray-300 rounded-md px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  >
+                    <option value="frequency">빈도순</option>
+                    <option value="time">최신순</option>
+                    <option value="rating">평점순</option>
+                  </select>
                 </div>
-              ))}
+              </div>
+              
+              <div className="space-y-4">
+                {frequentQueries.map((query, index) => (
+                  <div key={index} className="border border-gray-200 rounded-lg p-4 hover:shadow-md transition-shadow">
+                    <div className="flex justify-between items-start mb-2">
+                      <h4 className="font-medium text-gray-900 flex-1 mr-4">
+                        {query.query}
+                      </h4>
+                      <div className="flex space-x-4 text-sm text-gray-600">
+                        <span className="bg-blue-100 text-blue-800 px-2 py-1 rounded-full text-xs font-medium">
+                          {query.count}회
+                        </span>
+                        {query.avgRating && (
+                          <span className="bg-yellow-100 text-yellow-800 px-2 py-1 rounded-full text-xs font-medium">
+                            ⭐ {query.avgRating}
+                          </span>
+                        )}
+                      </div>
+                    </div>
+                    <div className="grid grid-cols-1 md:grid-cols-3 gap-2 text-sm text-gray-500">
+                      <span>
+                        <span className="font-medium">유형:</span> {query.queryType}
+                      </span>
+                      <span>
+                        <span className="font-medium">평균 응답시간:</span> {formatResponseTime(query.avgResponseTime)}
+                      </span>
+                      <span>
+                        <span className="font-medium">마지막 질의:</span> {formatDate(query.lastAsked)}
+                      </span>
+                    </div>
+                    {frequentQueriesSortBy === 'time' && query.firstAsked && (
+                      <div className="mt-2 text-sm text-gray-400">
+                        <span className="font-medium">최초 질의:</span> {formatDate(query.firstAsked)}
+                      </div>
+                    )}
+                  </div>
+                ))}
+                
+                {frequentQueries.length === 0 && (
+                  <div className="text-center py-8 text-gray-500">
+                    표시할 데이터가 없습니다.
+                  </div>
+                )}
+              </div>
             </div>
           </div>
         )}

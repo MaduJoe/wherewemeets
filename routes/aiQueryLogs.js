@@ -143,26 +143,46 @@ router.get('/admin/logs', auth, async (req, res) => {
       search
     } = req.query;
 
+    console.log('🔍 AI 질의 로그 조회 요청:', {
+      page, limit, queryType, userType, success, startDate, endDate, search
+    });
+
     // 필터 조건 구성
     const filter = {};
     
-    if (queryType) filter.queryType = queryType;
-    if (userType) filter.userType = userType;
-    if (success !== undefined) filter.success = success === 'true';
+    if (queryType && queryType.trim()) filter.queryType = queryType;
+    if (userType && userType.trim()) filter.userType = userType;
+    if (success && success.trim()) filter.success = success === 'true';
     
     if (startDate || endDate) {
       filter.createdAt = {};
-      if (startDate) filter.createdAt.$gte = new Date(startDate);
-      if (endDate) filter.createdAt.$lte = new Date(endDate);
+      if (startDate) {
+        const start = new Date(startDate);
+        start.setHours(0, 0, 0, 0); // 해당 날짜의 00:00:00
+        filter.createdAt.$gte = start;
+        console.log('📅 시작날짜 필터:', startDate, '→', start);
+      }
+      if (endDate) {
+        const end = new Date(endDate);
+        end.setHours(23, 59, 59, 999); // 해당 날짜의 23:59:59.999
+        filter.createdAt.$lte = end;
+        console.log('📅 종료날짜 필터:', endDate, '→', end);
+      }
     }
 
-    if (search) {
+    if (search && search.trim()) {
       filter.$or = [
         { query: { $regex: search, $options: 'i' } },
         { response: { $regex: search, $options: 'i' } },
         { category: { $regex: search, $options: 'i' } }
       ];
     }
+
+    console.log('📋 적용된 필터:', filter);
+
+    // 전체 문서 수 확인 (필터 없이)
+    const totalDocsInDB = await AIQueryLog.countDocuments({});
+    console.log('📊 DB 전체 문서 수:', totalDocsInDB);
 
     const options = {
       page: parseInt(page),
@@ -178,6 +198,10 @@ router.get('/admin/logs', auth, async (req, res) => {
       .lean();
 
     const totalCount = await AIQueryLog.countDocuments(filter);
+    
+    console.log('📊 필터 적용 후 문서 수:', totalCount);
+    console.log('📊 조회된 로그 수:', logs.length);
+
     const totalPages = Math.ceil(totalCount / options.limit);
 
     res.json({
@@ -195,7 +219,7 @@ router.get('/admin/logs', auth, async (req, res) => {
     });
 
   } catch (error) {
-    console.error('AI 질의 로그 조회 실패:', error);
+    console.error('❌ AI 질의 로그 조회 실패:', error);
     res.status(500).json({
       success: false,
       message: '서버 오류가 발생했습니다.'
@@ -317,7 +341,22 @@ router.get('/admin/frequent-queries', auth, async (req, res) => {
       });
     }
 
-    const { limit = 20, days = 30 } = req.query;
+    const { limit = 20, days = 30, sortBy = 'frequency' } = req.query;
+
+    // 정렬 옵션 설정
+    let sortOptions = {};
+    switch (sortBy) {
+      case 'time':
+        sortOptions = { lastAsked: -1 }; // 최신순
+        break;
+      case 'rating':
+        sortOptions = { avgRating: -1, count: -1 }; // 평점순, 빈도순 보조
+        break;
+      case 'frequency':
+      default:
+        sortOptions = { count: -1 }; // 빈도순 (기본값)
+        break;
+    }
 
     const frequentQueries = await AIQueryLog.aggregate([
       {
@@ -343,11 +382,12 @@ router.get('/admin/frequent-queries', auth, async (req, res) => {
           queryType: { $first: "$queryType" },
           avgResponseTime: { $avg: "$responseTime" },
           avgRating: { $avg: "$userRating" },
-          lastAsked: { $max: "$createdAt" }
+          lastAsked: { $max: "$createdAt" },
+          firstAsked: { $min: "$createdAt" }
         }
       },
       {
-        $sort: { count: -1 }
+        $sort: sortOptions
       },
       {
         $limit: parseInt(limit)
@@ -360,14 +400,16 @@ router.get('/admin/frequent-queries', auth, async (req, res) => {
           queryType: 1,
           avgResponseTime: { $round: ["$avgResponseTime", 2] },
           avgRating: { $round: ["$avgRating", 1] },
-          lastAsked: 1
+          lastAsked: 1,
+          firstAsked: 1
         }
       }
     ]);
 
     res.json({
       success: true,
-      data: frequentQueries
+      data: frequentQueries,
+      sortBy
     });
 
   } catch (error) {

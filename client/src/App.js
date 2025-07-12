@@ -2,8 +2,6 @@ import React, { useEffect } from 'react';
 import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-dom';
 import { Toaster } from 'react-hot-toast';
 import { AuthProvider, useAuth } from './contexts/AuthContext';
-import { Elements } from '@stripe/react-stripe-js';
-import { loadStripe } from '@stripe/stripe-js';
 
 // Components
 import Navbar from './components/Navbar';
@@ -20,14 +18,12 @@ import MeetingDetailPage from './pages/MeetingDetailPage';
 import MeetingPlannerPage from './pages/MeetingPlannerPage';
 import ProfilePage from './pages/ProfilePage';
 import PricingPage from './pages/PricingPage';
+import PaymentSuccessPage from './pages/PaymentSuccessPage';
+import PaymentFailPage from './pages/PaymentFailPage';
 import DateTestPage from './pages/DateTestPage';
 import AdminAIAnalyticsPage from './pages/AdminAIAnalyticsPage';
 
-// Stripe 설정
-const stripePromise = loadStripe(
-  process.env.REACT_APP_STRIPE_PUBLISHABLE_KEY || 
-  'pk_test_51234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef'
-);
+// 토스페이먼츠로 결제 시스템 변경됨
 
 // 로딩 스피너 컴포넌트
 const LoadingSpinner = () => (
@@ -71,6 +67,8 @@ const AppContent = () => {
             <Route path="/meeting-planner/:id?" element={<MeetingPlannerPage />} />
             <Route path="/profile" element={<ProfilePage />} />
             <Route path="/pricing" element={<PricingPage />} />
+            <Route path="/payment/success" element={<PaymentSuccessPage />} />
+            <Route path="/payment/fail" element={<PaymentFailPage />} />
             <Route path="/date-test" element={<DateTestPage />} />
             <Route path="/admin/ai-analytics" element={<AdminAIAnalyticsPage />} />
             <Route path="*" element={<Navigate to="/" />} />
@@ -85,11 +83,9 @@ const AppContent = () => {
 
 function App() {
   return (
-    <Elements stripe={stripePromise}>
-      <AuthProvider>
-        <AppContent />
-      </AuthProvider>
-    </Elements>
+    <AuthProvider>
+      <AppContent />
+    </AuthProvider>
   );
 }
 
