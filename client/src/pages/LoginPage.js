@@ -191,7 +191,7 @@ const LoginPage = () => {
           </form>
 
           {/* 데모 계정 안내 */}
-          <div className="mt-6 p-4 bg-blue-50 border border-blue-200 rounded-md">
+          {/* <div className="mt-6 p-4 bg-blue-50 border border-blue-200 rounded-md">
             <h4 className="text-sm font-medium text-blue-900 mb-2">💡 데모 계정으로 체험해보세요</h4>
             <p className="text-xs text-blue-700 mb-2">
               회원가입 없이 바로 체험하거나, 테스트 계정으로 로그인할 수 있습니다.
@@ -200,7 +200,7 @@ const LoginPage = () => {
               <p><strong>이메일:</strong> test@example.com</p>
               <p><strong>비밀번호:</strong> 123456</p>
             </div>
-          </div>
+          </div> */}
         </div>
       </div>
     </div>

@@ -59,7 +59,7 @@ const Footer = () => {
         <div className="border-t border-gray-800 mt-8 pt-8">
           <div className="flex justify-center">
             <p className="text-sm text-gray-400">
-              © 2024 WhereWeMeets. All rights reserved.
+              © 2025 WhereWeMeets. All rights reserved.
             </p>
           </div>
         </div>

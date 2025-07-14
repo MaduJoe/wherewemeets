@@ -36,9 +36,13 @@ const MeetingHistory = () => {
       if (response.data.success) {
         setHistory(response.data.data.history);
         setPagination(response.data.data.pagination);
+      } else {
+        console.error('히스토리 조회 실패:', response.data.message);
+        setHistory([]);
       }
     } catch (error) {
       console.error('히스토리 조회 실패:', error);
+      setHistory([]);
     } finally {
       setLoading(false);
     }
@@ -51,6 +55,8 @@ const MeetingHistory = () => {
       
       if (response.data.success) {
         setStats(response.data.data);
+      } else {
+        console.error('통계 조회 실패:', response.data.message);
       }
     } catch (error) {
       console.error('통계 조회 실패:', error);
@@ -60,7 +66,7 @@ const MeetingHistory = () => {
   // 미팅 상태 변경
   const updateMeetingStatus = async (meetingId, status, notes = '') => {
     try {
-      const response = await api.patch('/users/history/' + meetingId + '/status', {
+      const response = await api.patch(`/users/history/${meetingId}/status`, {
         status,
         notes
       });
@@ -81,7 +87,7 @@ const MeetingHistory = () => {
     if (!window.confirm('이 미팅 기록을 삭제하시겠습니까?')) return;
     
     try {
-      const response = await api.delete('/users/history/' + meetingId);
+      const response = await api.delete(`/users/history/${meetingId}`);
       
       if (response.data.success) {
         fetchHistory();
@@ -97,16 +103,16 @@ const MeetingHistory = () => {
   // 카테고리 아이콘
   const getCategoryIcon = (category) => {
     const icons = {
-      '카페': '☕',
-      '식당': '🍽️',
-      '술집': '🍺',
-      '공원': '🌳',
-      '영화관': '🎬',
-      '쇼핑몰': '🛍️',
-      '헬스장': '💪',
-      '스터디카페': '📚',
-      '노래방': '🎤',
-      '기타': '📍'
+      'cafe': '☕',
+      'restaurant': '🍽️',
+      'bar': '🍺',
+      'park': '🌳',
+      'entertainment': '🎬',
+      'shopping': '🛍️',
+      'gym': '💪',
+      'study': '📚',
+      'karaoke': '🎤',
+      'other': '📍'
     };
     return icons[category] || '📍';
   };
@@ -114,220 +120,212 @@ const MeetingHistory = () => {
   // 상태 배지
   const getStatusBadge = (status) => {
     const statusMap = {
-      planning: { text: '계획중', color: 'bg-blue-100 text-blue-800' },
-      completed: { text: '완료', color: 'bg-green-100 text-green-800' },
-      cancelled: { text: '취소', color: 'bg-red-100 text-red-800' }
+      planning: { text: '계획중', className: 'status-badge planning' },
+      completed: { text: '완료', className: 'status-badge completed' },
+      cancelled: { text: '취소', className: 'status-badge cancelled' }
     };
     
     const statusInfo = statusMap[status] || statusMap.planning;
     
     return (
-      <span className={`px-2 py-1 text-xs font-medium rounded-full ${statusInfo.color}`}>
+      <span className={statusInfo.className}>
         {statusInfo.text}
       </span>
     );
   };
 
   return (
-    <div className="meeting-history">
-      {/* 통계 카드 */}
+    <div className="meeting-history-container">
+      {/* 통계 섹션 */}
       {stats && (
-        <div className="stats-grid mb-8">
-          <div className="stat-card">
-            <h3>총 미팅 수</h3>
-            <p className="stat-number">{stats.totalMeetings}</p>
+        <div className="stats-section">
+          <h3>내 미팅 통계</h3>
+          <div className="stats-grid">
+            <div className="stat-card">
+              <div className="stat-number">{stats.totalMeetings}</div>
+              <div className="stat-label">총 미팅</div>
+            </div>
+            <div className="stat-card">
+              <div className="stat-number">{stats.hostCount}</div>
+              <div className="stat-label">주최한 미팅</div>
+            </div>
+            <div className="stat-card">
+              <div className="stat-number">{stats.participantCount}</div>
+              <div className="stat-label">참여한 미팅</div>
+            </div>
+            <div className="stat-card">
+              <div className="stat-number">{stats.completedMeetings}</div>
+              <div className="stat-label">완료된 미팅</div>
+            </div>
           </div>
-          <div className="stat-card">
-            <h3>주최한 미팅</h3>
-            <p className="stat-number">{stats.hostCount}</p>
-          </div>
-          <div className="stat-card">
-            <h3>참여한 미팅</h3>
-            <p className="stat-number">{stats.participantCount}</p>
-          </div>
-          <div className="stat-card">
-            <h3>완료된 미팅</h3>
-            <p className="stat-number">{stats.completedMeetings}</p>
-          </div>
-        </div>
-      )}
-
-      {/* 선호 카테고리 */}
-      {stats?.favoriteCategories?.length > 0 && (
-        <div className="favorite-categories mb-6">
-          <h3 className="text-lg font-semibold mb-3">자주 찾는 장소 유형</h3>
-          <div className="category-list">
-            {stats.favoriteCategories.map((item, index) => (
-              <div key={index} className="category-item">
-                <span className="category-icon">{getCategoryIcon(item.category)}</span>
-                <span className="category-name">{item.category}</span>
-                <span className="category-count">{item.count}회</span>
+          
+          {/* 선호 카테고리 */}
+          {stats.favoriteCategories && stats.favoriteCategories.length > 0 && (
+            <div className="favorite-categories">
+              <h4>선호 카테고리</h4>
+              <div className="categories-list">
+                {stats.favoriteCategories.map((cat, index) => (
+                  <div key={index} className="category-item">
+                    <span className="category-name">{cat.category}</span>
+                    <span className="category-count">{cat.count}회</span>
+                  </div>
+                ))}
               </div>
-            ))}
-          </div>
+            </div>
+          )}
         </div>
       )}
 
-      {/* 필터 */}
-      <div className="filters mb-6">
-        <div className="filter-group">
-          <label>상태</label>
-          <select 
-            value={filter.status} 
-            onChange={(e) => {
-              setFilter({...filter, status: e.target.value});
-              setPagination({...pagination, currentPage: 1});
-            }}
-          >
-            <option value="all">전체</option>
-            <option value="planning">계획중</option>
-            <option value="completed">완료</option>
-            <option value="cancelled">취소</option>
-          </select>
-        </div>
-        
-        <div className="filter-group">
-          <label>카테고리</label>
-          <select 
-            value={filter.category} 
-            onChange={(e) => {
-              setFilter({...filter, category: e.target.value});
-              setPagination({...pagination, currentPage: 1});
-            }}
-          >
-            <option value="all">전체</option>
-            <option value="카페">카페</option>
-            <option value="식당">식당</option>
-            <option value="술집">술집</option>
-            <option value="공원">공원</option>
-            <option value="영화관">영화관</option>
-            <option value="쇼핑몰">쇼핑몰</option>
-            <option value="기타">기타</option>
-          </select>
+      {/* 필터 섹션 */}
+      <div className="filter-section">
+        <h3>미팅 히스토리</h3>
+        <div className="filters">
+          <div className="filter-group">
+            <label>상태</label>
+            <select
+              value={filter.status}
+              onChange={(e) => setFilter({ ...filter, status: e.target.value })}
+            >
+              <option value="all">전체</option>
+              <option value="planning">계획 중</option>
+              <option value="completed">완료</option>
+              <option value="cancelled">취소</option>
+            </select>
+          </div>
+          
+          <div className="filter-group">
+            <label>카테고리</label>
+            <select
+              value={filter.category}
+              onChange={(e) => setFilter({ ...filter, category: e.target.value })}
+            >
+              <option value="all">전체</option>
+              <option value="restaurant">식당</option>
+              <option value="cafe">카페</option>
+              <option value="bar">술집</option>
+              <option value="park">공원</option>
+              <option value="shopping">쇼핑</option>
+              <option value="entertainment">엔터테인먼트</option>
+            </select>
+          </div>
         </div>
       </div>
 
       {/* 히스토리 목록 */}
-      {loading ? (
-        <div className="loading-spinner">
-          <div className="spinner"></div>
-          <p>미팅 히스토리를 불러오는 중...</p>
-        </div>
-      ) : history.length === 0 ? (
-        <div className="empty-state">
-          <p>아직 미팅 기록이 없습니다.</p>
-          <p className="text-sm text-gray-500">첫 미팅을 만들어보세요!</p>
-        </div>
-      ) : (
-        <div className="history-list">
-          {history.map((meeting) => (
-            <div key={meeting._id} className="history-item">
-              <div className="meeting-header">
-                <div className="meeting-info">
-                  <h4 className="meeting-title">{meeting.title}</h4>
-                  <p className="meeting-date">{formatVoteTime(meeting.createdAt)}</p>
-                </div>
-                <div className="meeting-status">
-                  {getStatusBadge(meeting.meetingStatus)}
-                </div>
-              </div>
-
-              {meeting.selectedPlace && (
-                <div className="selected-place">
-                  <span className="place-icon">{getCategoryIcon(meeting.selectedPlace.category)}</span>
-                  <div className="place-info">
-                    <p className="place-name">{meeting.selectedPlace.name}</p>
-                    <p className="place-address">{meeting.selectedPlace.address}</p>
+      <div className="history-section">
+        {loading ? (
+          <div className="loading-state">
+            <div className="loading-spinner"></div>
+            <p>미팅 히스토리를 불러오는 중...</p>
+          </div>
+        ) : history.length === 0 ? (
+          <div className="empty-state">
+            <div className="empty-icon">📅</div>
+            <h4>아직 미팅 기록이 없습니다</h4>
+            <p>첫 미팅을 만들어보세요!</p>
+            <button 
+              className="create-meeting-btn"
+              onClick={() => window.location.href = '/planner'}
+            >
+              첫 미팅 만들어보기
+            </button>
+          </div>
+        ) : (
+          <>
+            <div className="history-list">
+              {history.map((meeting, index) => (
+                <div key={index} className="history-item">
+                  <div className="meeting-header">
+                    <h4>{meeting.title}</h4>
+                    <div className="meeting-meta">
+                      <span className="meeting-date">
+                        {formatVoteTime(meeting.createdAt)}
+                      </span>
+                      <span className={`role-badge ${meeting.role}`}>
+                        {meeting.role === 'host' ? '주최자' : '참여자'}
+                      </span>
+                    </div>
                   </div>
-                  {meeting.selectedPlace.rating && (
-                    <div className="place-rating">
-                      <span>⭐ {meeting.selectedPlace.rating}</span>
+                  
+                  {meeting.description && (
+                    <p className="meeting-description">{meeting.description}</p>
+                  )}
+                  
+                  {meeting.selectedPlace && (
+                    <div className="selected-place">
+                      <div className="place-info">
+                        <span className="place-icon">
+                          {getCategoryIcon(meeting.selectedPlace.category)}
+                        </span>
+                        <div className="place-details">
+                          <strong>{meeting.selectedPlace.name}</strong>
+                          <span className="place-address">
+                            {meeting.selectedPlace.address}
+                          </span>
+                          {meeting.selectedPlace.rating && (
+                            <span className="place-rating">
+                              ⭐ {meeting.selectedPlace.rating}
+                            </span>
+                          )}
+                        </div>
+                      </div>
                     </div>
                   )}
-                </div>
-              )}
-
-              <div className="meeting-details">
-                <div className="detail-item">
-                  <span className="detail-label">참여자 수:</span>
-                  <span>{meeting.participantCount}명</span>
-                </div>
-                <div className="detail-item">
-                  <span className="detail-label">선정 방식:</span>
-                  <span>
-                    {meeting.selectionMethod === 'voting' && '투표'}
-                    {meeting.selectionMethod === 'random' && '랜덤'}
-                    {meeting.selectionMethod === 'manual' && '수동'}
-                  </span>
-                </div>
-                {meeting.totalVotes > 0 && (
-                  <div className="detail-item">
-                    <span className="detail-label">총 투표 수:</span>
-                    <span>{meeting.totalVotes}표</span>
+                  
+                  <div className="meeting-stats">
+                    <span>참여자: {meeting.participantCount}명</span>
+                    <span>총 투표: {meeting.totalVotes}표</span>
+                    <span>선택방법: {meeting.selectionMethod === 'voting' ? '투표' : '랜덤'}</span>
                   </div>
-                )}
-              </div>
-
-              {meeting.notes && (
-                <div className="meeting-notes">
-                  <p className="notes-label">메모:</p>
-                  <p className="notes-content">{meeting.notes}</p>
+                  
+                  <div className="meeting-actions">
+                    {getStatusBadge(meeting.meetingStatus)}
+                    
+                    {meeting.meetingStatus === 'planning' && (
+                      <button
+                        className="complete-btn"
+                        onClick={() => updateMeetingStatus(meeting.meetingId, 'completed')}
+                      >
+                        완료 처리
+                      </button>
+                    )}
+                    
+                    <button
+                      className="delete-btn"
+                      onClick={() => deleteMeeting(meeting.meetingId)}
+                    >
+                      삭제
+                    </button>
+                  </div>
                 </div>
-              )}
-
-              <div className="meeting-actions">
-                {meeting.meetingStatus === 'planning' && (
-                  <>
-                    <button 
-                      onClick={() => updateMeetingStatus(meeting.meetingId, 'completed')}
-                      className="btn-complete"
-                    >
-                      완료 처리
-                    </button>
-                    <button 
-                      onClick={() => updateMeetingStatus(meeting.meetingId, 'cancelled')}
-                      className="btn-cancel"
-                    >
-                      취소 처리
-                    </button>
-                  </>
-                )}
-                <button 
-                  onClick={() => deleteMeeting(meeting.meetingId)}
-                  className="btn-delete"
+              ))}
+            </div>
+            
+            {/* 페이지네이션 */}
+            {pagination.totalPages > 1 && (
+              <div className="pagination">
+                <button
+                  disabled={!pagination.hasPrev}
+                  onClick={() => setPagination({ ...pagination, currentPage: pagination.currentPage - 1 })}
                 >
-                  삭제
+                  이전
+                </button>
+                
+                <span className="page-info">
+                  {pagination.currentPage} / {pagination.totalPages}
+                </span>
+                
+                <button
+                  disabled={!pagination.hasNext}
+                  onClick={() => setPagination({ ...pagination, currentPage: pagination.currentPage + 1 })}
+                >
+                  다음
                 </button>
               </div>
-            </div>
-          ))}
-        </div>
-      )}
-
-      {/* 페이지네이션 */}
-      {pagination.totalPages > 1 && (
-        <div className="pagination">
-          <button 
-            onClick={() => setPagination({...pagination, currentPage: pagination.currentPage - 1})}
-            disabled={!pagination.hasPrev}
-            className="pagination-btn"
-          >
-            이전
-          </button>
-          
-          <div className="pagination-info">
-            {pagination.currentPage} / {pagination.totalPages} 페이지
-          </div>
-          
-          <button 
-            onClick={() => setPagination({...pagination, currentPage: pagination.currentPage + 1})}
-            disabled={!pagination.hasNext}
-            className="pagination-btn"
-          >
-            다음
-          </button>
-        </div>
-      )}
+            )}
+          </>
+        )}
+      </div>
     </div>
   );
 };

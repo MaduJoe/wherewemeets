@@ -17,6 +17,53 @@ import { toast } from 'react-hot-toast';
 import MeetingHistory from '../components/MeetingHistory';
 import PremiumOnly from '../components/PremiumOnly';
 
+// 기능명을 한글로 맵핑하는 함수
+const getFeatureDisplayName = (featureName) => {
+  const featureMap = {
+    // 홈페이지에서 호출되는 기능들
+    'homepage_smart-planner': '스마트 플래너 (홈)',
+    'homepage_group-voting': '그룹 투표 (홈)',
+    'homepage_ai-recommendations': 'AI 추천 (홈)',
+    'homepage_place-explorer': '장소 탐색 (홈)',
+    'homepage_meeting-history': '미팅 히스토리 (홈)',
+    'homepage_premium-features': '프리미엄 기능 (홈)',
+    
+    // 일반 기능들
+    'smart-planner': '스마트 플래너',
+    'group-voting': '그룹 투표',
+    'ai-recommendations': 'AI 장소 추천',
+    'place-explorer': '장소 탐색',
+    'meeting-history': '미팅 히스토리',
+    'premium-features': '프리미엄 기능',
+    'random-selector': '랜덤 선택',
+    'rule-based-places': '규칙 기반 장소',
+    'chat-assistance': '채팅 도움',
+    'voice-input': '음성 입력',
+    'location-sharing': '위치 공유',
+    'meeting-analytics': '미팅 분석',
+    'social-integration': '소셜 연동',
+    'notification-settings': '알림 설정',
+    'profile-management': '프로필 관리',
+    'payment-features': '결제 기능',
+    'mobile-app': '모바일 앱',
+    'export-data': '데이터 내보내기',
+    
+    // 소셜 로그인
+    'social_login_google': '구글 로그인',
+    'social_login_kakao': '카카오 로그인',
+    'social_login_naver': '네이버 로그인',
+    'social_login_github': '깃허브 로그인',
+    
+    // 기타
+    'dashboard': '대시보드',
+    'settings': '설정',
+    'help': '도움말',
+    'feedback': '피드백'
+  };
+  
+  return featureMap[featureName] || featureName;
+};
+
 const DashboardPage = () => {
   const { user, logout, isAuthenticated, updateProfile, changePassword, getDashboardData } = useAuth();
   const navigate = useNavigate();
@@ -108,9 +155,10 @@ const DashboardPage = () => {
             totalVotes: 45,
             favoriteCategories: ['restaurant', 'cafe', 'park'],
             featureUsage: [
-              { feature: 'smart-planner', count: 15, lastUsed: new Date() },
+              { feature: 'homepage_smart-planner', count: 76, lastUsed: new Date() },
               { feature: 'group-voting', count: 12, lastUsed: new Date() },
-              { feature: 'ai-recommendations', count: 8, lastUsed: new Date() }
+              { feature: 'smart-planner', count: 8, lastUsed: new Date() },
+              { feature: 'ai-recommendations', count: 5, lastUsed: new Date() }
             ],
             recentActivity: new Date()
           }
@@ -136,7 +184,14 @@ const DashboardPage = () => {
 
   const handleProfileUpdate = async () => {
     try {
+      console.log('DashboardPage: 프로필 업데이트 시작');
+      console.log('DashboardPage: profileForm 전체:', profileForm);
+      console.log('DashboardPage: profileForm.preferences:', profileForm.preferences);
+      console.log('DashboardPage: profileForm.preferences.notifications:', profileForm.preferences.notifications);
+      
       const result = await updateProfile(profileForm);
+      
+      console.log('DashboardPage: updateProfile 결과:', result);
       
       if (result.success) {
         setIsEditing(false);
@@ -145,7 +200,7 @@ const DashboardPage = () => {
         toast.error(result.message || '프로필 업데이트에 실패했습니다.');
       }
     } catch (error) {
-      console.error('프로필 업데이트 에러:', error);
+      console.error('DashboardPage: 프로필 업데이트 에러:', error);
       toast.error('프로필 업데이트에 실패했습니다.');
     }
   };
@@ -293,7 +348,7 @@ const DashboardPage = () => {
                   <div className="space-y-4">
                     {dashboardData?.stats?.featureUsage?.map((feature, index) => (
                       <div key={index} className="flex justify-between items-center">
-                        <span className="text-gray-700">{feature.feature}</span>
+                        <span className="text-gray-700">{getFeatureDisplayName(feature.feature)}</span>
                         <div className="flex items-center space-x-2">
                           <div className="w-32 bg-gray-200 rounded-full h-2">
                             <div 

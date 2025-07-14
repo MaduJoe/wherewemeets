@@ -72,7 +72,8 @@ router.post('/register', async (req, res) => {
         name: user.name,
         email: user.email,
         subscription: user.subscription,
-        isGuest: false
+        isGuest: false,
+        createdAt: user.createdAt
       }
     });
   } catch (error) {
@@ -116,7 +117,8 @@ router.post('/login', async (req, res) => {
         name: user.name,
         email: user.email,
         subscription: user.subscription,
-        isGuest: false
+        isGuest: false,
+        createdAt: user.createdAt
       }
     });
   } catch (error) {
@@ -175,7 +177,8 @@ router.post('/social-login', async (req, res) => {
         email: user.email,
         subscription: user.subscription,
         provider: user.socialLogin.provider,
-        isGuest: false
+        isGuest: false,
+        createdAt: user.createdAt
       }
     });
   } catch (error) {
@@ -217,6 +220,8 @@ router.get('/me', auth, async (req, res) => {
 // 프로필 업데이트
 router.put('/profile', auth, async (req, res) => {
   try {
+    console.log('프로필 업데이트 요청:', req.body);
+    
     const {
       name,
       phone,
@@ -230,6 +235,65 @@ router.put('/profile', auth, async (req, res) => {
       return res.status(404).json({ message: '사용자를 찾을 수 없습니다.' });
     }
 
+    console.log('현재 사용자 preferences:', user.preferences);
+
+    // preferences validation
+    if (preferences) {
+      console.log('업데이트할 preferences:', preferences);
+      
+      // transportMode validation
+      if (preferences.transportMode && !['driving', 'walking', 'transit', 'bicycling'].includes(preferences.transportMode)) {
+        return res.status(400).json({ 
+          message: `유효하지 않은 교통수단입니다: ${preferences.transportMode}` 
+        });
+      }
+      
+      // language validation
+      if (preferences.language && !['ko', 'en'].includes(preferences.language)) {
+        return res.status(400).json({ 
+          message: `유효하지 않은 언어입니다: ${preferences.language}` 
+        });
+      }
+      
+      // preferredCategories validation
+      if (preferences.preferredCategories && Array.isArray(preferences.preferredCategories)) {
+        const validCategories = ['restaurant', 'cafe', 'park', 'shopping', 'entertainment', 'bar'];
+        const invalidCategories = preferences.preferredCategories.filter(cat => !validCategories.includes(cat));
+        if (invalidCategories.length > 0) {
+          return res.status(400).json({ 
+            message: `유효하지 않은 카테고리입니다: ${invalidCategories.join(', ')}` 
+          });
+        }
+      }
+      
+      // maxDistance validation
+      if (preferences.maxDistance !== undefined && (preferences.maxDistance < 1 || preferences.maxDistance > 100)) {
+        return res.status(400).json({ 
+          message: `최대 이동거리는 1-100km 사이여야 합니다: ${preferences.maxDistance}` 
+        });
+      }
+      
+      // notifications validation
+      if (preferences.notifications) {
+        const { email, push, sms } = preferences.notifications;
+        if (email !== undefined && typeof email !== 'boolean') {
+          return res.status(400).json({ 
+            message: `이메일 알림 설정은 boolean 값이어야 합니다: ${email}` 
+          });
+        }
+        if (push !== undefined && typeof push !== 'boolean') {
+          return res.status(400).json({ 
+            message: `푸시 알림 설정은 boolean 값이어야 합니다: ${push}` 
+          });
+        }
+        if (sms !== undefined && typeof sms !== 'boolean') {
+          return res.status(400).json({ 
+            message: `SMS 알림 설정은 boolean 값이어야 합니다: ${sms}` 
+          });
+        }
+      }
+    }
+
     // 이름이 변경되는 경우 투표 데이터도 함께 업데이트
     const isNameChanged = name && name !== user.name;
     const oldName = user.name;
@@ -238,10 +302,105 @@ router.put('/profile', auth, async (req, res) => {
     if (name) user.name = name;
     if (phone !== undefined) user.phone = phone;
     if (bio !== undefined) user.bio = bio;
-    if (location) user.location = { ...user.location, ...location };
-    if (preferences) user.preferences = { ...user.preferences, ...preferences };
+    
+    // location 업데이트
+    if (location) {
+      user.location = {
+        ...user.location,
+        ...location
+      };
+    }
+    
+    // preferences 안전하게 업데이트
+    if (preferences) {
+      // 기존 preferences가 없으면 기본값으로 초기화
+      if (!user.preferences) {
+        user.preferences = {
+          transportMode: 'driving',
+          preferredCategories: [],
+          maxDistance: 30,
+          language: 'ko',
+          notifications: {
+            email: true,
+            push: true,
+            sms: false
+          }
+        };
+      }
+      
+      // 각 필드별로 안전하게 업데이트
+      if (preferences.transportMode !== undefined) {
+        user.preferences.transportMode = preferences.transportMode;
+      }
+      
+      if (preferences.preferredCategories !== undefined) {
+        user.preferences.preferredCategories = preferences.preferredCategories;
+      }
+      
+      if (preferences.maxDistance !== undefined) {
+        user.preferences.maxDistance = preferences.maxDistance;
+      }
+      
+      if (preferences.language !== undefined) {
+        user.preferences.language = preferences.language;
+      }
+      
+      // notifications 깊은 병합
+      if (preferences.notifications) {
+        if (!user.preferences.notifications) {
+          user.preferences.notifications = {
+            email: true,
+            push: true,
+            sms: false
+          };
+        }
+        
+        if (preferences.notifications.email !== undefined) {
+          user.preferences.notifications.email = preferences.notifications.email;
+        }
+        
+        if (preferences.notifications.push !== undefined) {
+          user.preferences.notifications.push = preferences.notifications.push;
+        }
+        
+        if (preferences.notifications.sms !== undefined) {
+          user.preferences.notifications.sms = preferences.notifications.sms;
+        }
+      }
+    }
 
-    await user.save();
+    console.log('업데이트 후 preferences:', user.preferences);
+
+    // MongoDB 업데이트 수행
+    const updateData = {};
+    
+    if (name) updateData.name = name;
+    if (phone !== undefined) updateData.phone = phone;
+    if (bio !== undefined) updateData.bio = bio;
+    if (location) {
+      updateData.location = {
+        ...user.location,
+        ...location
+      };
+    }
+    if (user.preferences) {
+      updateData.preferences = user.preferences;
+    }
+    updateData.updatedAt = new Date();
+
+    console.log('MongoDB 업데이트 데이터:', updateData);
+
+    const updatedUser = await User.findByIdAndUpdate(
+      req.user.userId,
+      { $set: updateData },
+      { new: true, runValidators: true }
+    );
+
+    if (!updatedUser) {
+      return res.status(404).json({ message: '사용자 업데이트에 실패했습니다.' });
+    }
+
+    console.log('업데이트 완료된 사용자:', updatedUser.preferences);
 
     // 이름이 변경된 경우 투표 데이터의 voter.name도 업데이트
     if (isNameChanged) {
@@ -256,19 +415,25 @@ router.put('/profile', auth, async (req, res) => {
     res.json({
       message: '프로필이 업데이트되었습니다.',
       user: {
-        id: user._id,
-        name: user.name,
-        email: user.email,
-        phone: user.phone,
-        bio: user.bio,
-        location: user.location,
-        subscription: user.subscription,
-        preferences: user.preferences
+        id: updatedUser._id,
+        name: updatedUser.name,
+        email: updatedUser.email,
+        phone: updatedUser.phone,
+        bio: updatedUser.bio,
+        location: updatedUser.location,
+        subscription: updatedUser.subscription,
+        preferences: updatedUser.preferences,
+        isGuest: false,
+        createdAt: updatedUser.createdAt
       }
     });
   } catch (error) {
     console.error('프로필 업데이트 에러:', error);
-    res.status(500).json({ message: '서버 오류가 발생했습니다.' });
+    console.error('에러 스택:', error.stack);
+    res.status(500).json({ 
+      message: '프로필 업데이트 중 오류가 발생했습니다.',
+      error: process.env.NODE_ENV === 'development' ? error.message : undefined
+    });
   }
 });
 

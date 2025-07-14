@@ -786,6 +786,10 @@ const MeetingPlannerPage = () => {
               <RandomSelector
                 meetingId={meeting?.id}
                 onLocationSelected={handleLocationSelected}
+                user={user}
+                meeting={meeting}
+                isOwner={isOwner}
+                onMeetingUpdate={setMeeting}
               />
             )}
           </div>

@@ -335,6 +335,10 @@ export const AuthProvider = ({ children }) => {
 
   const updateProfile = async (profileData) => {
     try {
+      console.log('클라이언트: 프로필 업데이트 요청 데이터:', profileData);
+      console.log('클라이언트: profileData.preferences:', profileData.preferences);
+      console.log('클라이언트: profileData.preferences.notifications:', profileData.preferences?.notifications);
+      
       const token = localStorage.getItem('token');
       const response = await fetch(`${API_BASE_URL}/auth/profile`, {
         method: 'PUT',
@@ -346,17 +350,19 @@ export const AuthProvider = ({ children }) => {
       });
 
       const data = await response.json();
+      console.log('클라이언트: 서버 응답:', data);
 
       if (response.ok) {
         setUser(data.user);
         toast.success(data.message);
         return { success: true, user: data.user };
       } else {
+        console.error('클라이언트: 프로필 업데이트 실패:', data);
         toast.error(data.message || '프로필 업데이트에 실패했습니다.');
         return { success: false, message: data.message };
       }
     } catch (error) {
-      console.error('프로필 업데이트 에러:', error);
+      console.error('클라이언트: 프로필 업데이트 에러:', error);
       toast.error('서버 오류가 발생했습니다.');
       return { success: false, message: '서버 오류가 발생했습니다.' };
     }

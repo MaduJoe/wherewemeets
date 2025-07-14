@@ -157,12 +157,58 @@ const Wall = ({ position, rotation }) => {
 };
 
 // 메인 3D 주사위 컴포넌트
-const Dice3D = ({ onResult, shouldRoll, resetRoll }) => {
+const Dice3D = ({ onResult, shouldRoll, resetRoll, onDiceClick, isClickable, hasResult }) => {
+  const handleCanvasClick = () => {
+    if (isClickable && onDiceClick) {
+      onDiceClick();
+    }
+  };
+
   return (
-    <div style={{ width: '100%', height: '400px' }}>
+    <div style={{ width: '100%', height: '400px', position: 'relative' }}>
+      {isClickable && (
+        <div 
+          style={{
+            position: 'absolute',
+            top: '10px',
+            left: '50%',
+            transform: 'translateX(-50%)',
+            backgroundColor: 'rgba(59, 130, 246, 0.9)',
+            color: 'white',
+            padding: '4px 12px',
+            borderRadius: '20px',
+            fontSize: '12px',
+            fontWeight: 'bold',
+            zIndex: 10,
+            pointerEvents: 'none'
+          }}
+        >
+          {hasResult ? '클릭하여 다시 하기' : '클릭하여 주사위 굴리기'}
+        </div>
+      )}
       <Canvas
         camera={{ position: [8, 8, 8], fov: 50 }}
         shadows
+        onClick={handleCanvasClick}
+        style={{ 
+          cursor: isClickable ? 'pointer' : 'default',
+          border: isClickable ? '2px solid #3b82f6' : '2px solid #d1d5db',
+          borderRadius: '8px',
+          transition: 'all 0.3s ease',
+          backgroundColor: isClickable ? '#f8fafc' : '#f1f5f9'
+        }}
+        onPointerEnter={(e) => {
+          if (isClickable) {
+            e.target.style.borderColor = '#1d4ed8';
+            e.target.style.backgroundColor = '#eff6ff';
+          }
+        }}
+        onPointerLeave={(e) => {
+          if (isClickable) {
+            e.target.style.borderColor = '#3b82f6';
+            e.target.style.backgroundColor = '#f8fafc';
+          }
+        }}
       >
         <ambientLight intensity={0.6} />
         <directionalLight 

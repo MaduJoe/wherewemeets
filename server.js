@@ -88,6 +88,31 @@ io.on('connection', (socket) => {
     });
   });
 
+  // 게임 시작 이벤트 (주사위, 퀴즈 등)
+  socket.on('game-start', (data) => {
+    console.log(`${data.gameType} 게임 시작:`, data);
+    // 같은 미팅의 모든 클라이언트에게 게임 시작 알림
+    socket.to(data.meetingId).emit('game-start', {
+      gameType: data.gameType,
+      quiz: data.quiz,
+      timestamp: Date.now()
+    });
+  });
+
+  // 게임 결과 이벤트 (주사위, 퀴즈 등)
+  socket.on('game-result', (data) => {
+    console.log(`${data.gameType} 게임 완료:`, data);
+    // 같은 미팅의 모든 클라이언트에게 게임 결과 알림
+    socket.to(data.meetingId).emit('game-result', {
+      gameType: data.gameType,
+      result: data.result,
+      diceValue: data.diceValue,
+      quiz: data.quiz,
+      answer: data.answer,
+      timestamp: Date.now()
+    });
+  });
+
   // 타이밍 게임 시작 이벤트
   socket.on('timing-game-start', (data) => {
     console.log('타이밍 게임 시작:', data);

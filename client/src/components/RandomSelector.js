@@ -8,6 +8,45 @@ import {
 } from '@heroicons/react/24/outline';
 import Dice3D from './Dice3D';
 
+// 미팅 히스토리 저장 함수
+const saveMeetingHistory = async (user, meetingData) => {
+  try {
+    if (!user || user.isGuest) {
+      console.log('게스트 사용자는 히스토리를 저장하지 않습니다.');
+      return { success: false, reason: 'guest' };
+    }
+
+    const historyData = {
+      meetingId: meetingData.id,
+      title: meetingData.title || '미팅 계획',
+      description: meetingData.description || '',
+      role: 'host',
+      participantCount: meetingData.participants?.length || 0,
+      selectedPlace: meetingData.selectedPlace,
+      candidatePlaces: meetingData.candidatePlaces || [],
+      totalVotes: meetingData.candidatePlaces?.reduce((sum, place) => sum + (place.votes || 0), 0) || 0,
+      selectionMethod: meetingData.selectionMethod || 'random',
+      meetingStatus: 'completed',
+      completedAt: new Date()
+    };
+
+    console.log('📊 히스토리 저장 데이터:', historyData);
+
+    const response = await api.post(`/users/${user.id}/history`, historyData);
+    
+    if (response.data.success) {
+      console.log('✅ 미팅 히스토리 저장 성공');
+      return { success: true, data: response.data.history };
+    } else {
+      console.error('❌ 미팅 히스토리 저장 실패:', response.data.error);
+      return { success: false, error: response.data.error };
+    }
+  } catch (error) {
+    console.error('❌ 미팅 히스토리 저장 중 오류:', error);
+    return { success: false, error: error.message };
+  }
+};
+
 // VoteService 클래스 (GroupVoting과 동일)
 class VoteService {
   async getVoteData(meetingId) {
@@ -24,7 +63,7 @@ class VoteService {
 const voteService = new VoteService();
 
 // SVG 기반 휠 컴포넌트
-const WheelComponent = ({ segments, onFinished, isSpinning, winningSegment, socket, meetingId }) => {
+const WheelComponent = ({ segments, onFinished, isSpinning, winningSegment, socket, meetingId, onCenterClick }) => {
   const [rotation, setRotation] = useState(0);
   const [isAnimating, setIsAnimating] = useState(false);
 
@@ -73,6 +112,10 @@ const WheelComponent = ({ segments, onFinished, isSpinning, winningSegment, sock
     
     // Socket.io로 다른 클라이언트에게 룰렛 시작 알림
     if (socket && meetingId) {
+      socket.emit('game-start', {
+        meetingId,
+        gameType: 'roulette'
+      });
       socket.emit('roulette-start', {
         meetingId,
         winningSegment: segments[winnerIndex]
@@ -242,9 +285,10 @@ const WheelComponent = ({ segments, onFinished, isSpinning, winningSegment, sock
               cy="200" 
               r="30" 
               fill={isAnimating ? 'url(#gradientCenter)' : '#ffffff'}
-              stroke={isAnimating ? '#fbbf24' : '#d1d5db'}
+              stroke={isAnimating ? '#fbbf24' : '#3b82f6'}
               strokeWidth="4"
-              className="transition-all duration-300"
+              className={`transition-all duration-300 ${!isAnimating ? 'cursor-pointer hover:fill-blue-50' : 'cursor-not-allowed'}`}
+              onClick={!isAnimating ? onCenterClick : undefined}
             />
             
             {/* 중앙 그라데이션 정의 */}
@@ -256,7 +300,11 @@ const WheelComponent = ({ segments, onFinished, isSpinning, winningSegment, sock
             </defs>
             
             {/* 중앙 아이콘 */}
-            <g transform="translate(200, 200)">
+            <g 
+              transform="translate(200, 200)" 
+              onClick={!isAnimating ? onCenterClick : undefined} 
+              className={`${!isAnimating ? 'cursor-pointer' : 'cursor-not-allowed'}`}
+            >
               <circle 
                 r="8" 
                 fill={isAnimating ? '#f59e0b' : '#3b82f6'}
@@ -270,6 +318,18 @@ const WheelComponent = ({ segments, onFinished, isSpinning, winningSegment, sock
                   strokeWidth="2"
                   className="animate-ping"
                 />
+              )}
+              {/* 클릭 가능 상태일 때 텍스트 표시 */}
+              {!isAnimating && (
+                <text
+                  textAnchor="middle"
+                  y="25"
+                  fontSize="9"
+                  fill="#3b82f6"
+                  className="font-bold select-none"
+                >
+                  CLICK
+                </text>
               )}
             </g>
           </svg>
@@ -287,7 +347,7 @@ const WheelComponent = ({ segments, onFinished, isSpinning, winningSegment, sock
   );
 };
 
-const RandomSelector = ({ meetingId, onLocationSelected }) => {
+const RandomSelector = ({ meetingId, onLocationSelected, user, meeting, isOwner, onMeetingUpdate }) => {
   const [spinning, setSpinning] = useState(false);
   const [result, setResult] = useState(null);
   const [candidatePlaces, setCandidatePlaces] = useState([]);
@@ -312,6 +372,7 @@ const RandomSelector = ({ meetingId, onLocationSelected }) => {
   const [quizMode, setQuizMode] = useState(false);
   const [currentQuiz, setCurrentQuiz] = useState(null);
   const [quizAnswer, setQuizAnswer] = useState('');
+  const [isQuizOwner, setIsQuizOwner] = useState(false);
   // const [quizParticipants, setQuizParticipants] = useState([]);
   
   // 타이밍 게임 상태
@@ -444,6 +505,68 @@ const RandomSelector = ({ meetingId, onLocationSelected }) => {
             console.log('🔄 실시간 룰렛 결과 동기화 완료');
           } catch (error) {
             console.error('실시간 룰렛 결과 저장 실패:', error);
+          }
+        }
+        
+        // 데이터도 다시 로드하여 선정 카운트 업데이트
+        setTimeout(() => {
+          if (!isDataLoading) {
+            loadCandidatePlacesData(true, false);
+          }
+        }, 1000);
+      });
+
+      // 게임 시작 이벤트 감지
+      newSocket.on('game-start', (data) => {
+        console.log(`다른 사용자가 ${data.gameType} 게임 시작:`, data);
+        
+        // 기존 결과 초기화
+        setResult(null);
+        setResultAnimating(false);
+        
+        if (data.gameType === 'dice') {
+          setDiceRolling(true);
+          setDiceResult(null);
+          setShouldRoll3D(true);
+        } else if (data.gameType === 'quiz' && data.quiz) {
+          setQuizMode(true);
+          setCurrentQuiz(data.quiz);
+          setQuizAnswer('');
+          setIsQuizOwner(false); // 다른 사용자의 퀴즈이므로 답안 제출 불가
+        }
+      });
+
+      // 게임 결과 이벤트 감지 (주사위, 퀴즈 등)
+      newSocket.on('game-result', (data) => {
+        console.log(`다른 사용자의 ${data.gameType} 게임 완료:`, data);
+        
+        if (data.result) {
+          const resultData = {
+            ...data.result,
+            fairnessInfo: getFairnessInfo(data.result.selectedPlace, candidatePlaces),
+            isRestoredResult: true
+          };
+          
+          setResult(resultData);
+          setResultAnimating(false);
+          
+          // 게임별 상태 초기화
+          if (data.gameType === 'dice') {
+            setDiceRolling(false);
+            setDiceResult(data.diceValue);
+          } else if (data.gameType === 'quiz') {
+            setQuizMode(false);
+            setCurrentQuiz(null);
+            setQuizAnswer('');
+            setIsQuizOwner(false);
+          }
+          
+          // localStorage에도 동기화
+          try {
+            localStorage.setItem(`roulette_result_${meetingId}`, JSON.stringify(resultData));
+            console.log(`🔄 실시간 ${data.gameType} 결과 동기화 완료`);
+          } catch (error) {
+            console.error(`실시간 ${data.gameType} 결과 저장 실패:`, error);
           }
         }
         
@@ -760,12 +883,6 @@ const RandomSelector = ({ meetingId, onLocationSelected }) => {
       description: '모든 후보 장소가 동일한 확률로 선정'
     },
     {
-      id: 'balanced',
-      name: '타이밍 스톱',
-      icon: '⏱️',
-      description: '목표 시간에 가장 근접하게 멈춘 사람이 승리'
-    },
-    {
       id: 'dice',
       name: '운명의 주사위',
       icon: '🎲',
@@ -801,9 +918,6 @@ const RandomSelector = ({ meetingId, onLocationSelected }) => {
       case 'quiz':
         startQuiz();
         break;
-      case 'balanced':
-        startTimingGame();
-        break;
       default:
         const randomPlace = getRandomSelection();
         setWinningSegment(randomPlace);
@@ -838,6 +952,14 @@ const RandomSelector = ({ meetingId, onLocationSelected }) => {
     setResultAnimating(false);
     setDiceResult(null);
     
+    // 웹소켓으로 주사위 시작 알림
+    if (socket && meetingId) {
+      socket.emit('game-start', {
+        meetingId,
+        gameType: 'dice'
+      });
+    }
+    
     // 3D 주사위 굴리기 시작
     setShouldRoll3D(true);
   };
@@ -865,6 +987,16 @@ const RandomSelector = ({ meetingId, onLocationSelected }) => {
     
     setResult(resultData);
     setResultAnimating(true);
+    
+    // 웹소켓으로 주사위 결과 전송
+    if (socket && meetingId) {
+      socket.emit('game-result', {
+        meetingId,
+        gameType: 'dice',
+        result: resultData,
+        diceValue: result
+      });
+    }
     
     // localStorage에 저장
     if (meetingId) {
@@ -943,6 +1075,23 @@ const RandomSelector = ({ meetingId, onLocationSelected }) => {
     setCurrentQuiz(quiz);
     setQuizMode(true);
     setQuizAnswer('');
+    setIsQuizOwner(true); // 퀴즈 시작자 설정
+    
+    // 웹소켓으로 퀴즈 시작 알림 (정답 제외)
+    if (socket && meetingId) {
+      const quizForBroadcast = {
+        place: quiz.place,
+        question: quiz.question,
+        answers: quiz.answers
+        // correct 필드는 제외하여 정답 노출 방지
+      };
+      
+      socket.emit('game-start', {
+        meetingId,
+        gameType: 'quiz',
+        quiz: quizForBroadcast
+      });
+    }
   };
 
   // 퀴즈 답안 제출
@@ -971,6 +1120,17 @@ const RandomSelector = ({ meetingId, onLocationSelected }) => {
       setResult(resultData);
       setResultAnimating(true);
       
+      // 웹소켓으로 퀴즈 결과 전송
+      if (socket && meetingId) {
+        socket.emit('game-result', {
+          meetingId,
+          gameType: 'quiz',
+          result: resultData,
+          quiz: currentQuiz,
+          answer: quizAnswer
+        });
+      }
+      
       // localStorage에 저장
       if (meetingId) {
         try {
@@ -992,6 +1152,7 @@ const RandomSelector = ({ meetingId, onLocationSelected }) => {
     setQuizMode(false);
     setCurrentQuiz(null);
     setQuizAnswer('');
+    setIsQuizOwner(false);
   };
 
   // 멀티플레이어 타이밍 게임 시작
@@ -1355,21 +1516,76 @@ const RandomSelector = ({ meetingId, onLocationSelected }) => {
     return { level: '보통', color: 'text-blue-600' };
   };
 
-  // 결과 초기화 함수
+  // 결과 초기화 및 재시작 함수
   const clearResult = () => {
-    if (window.confirm('룰렛 결과를 초기화하시겠습니까?\n\n이 작업은 되돌릴 수 없습니다.')) {
-      setResult(null);
-      setResultAnimating(false);
-      
-      // localStorage에서도 제거
-      if (meetingId) {
-        try {
-          localStorage.removeItem(`roulette_result_${meetingId}`);
-          console.log('🗑️ 룰렛 결과 초기화 완료');
-        } catch (error) {
-          console.error('룰렛 결과 초기화 실패:', error);
-        }
+    const gameType = result?.selectionMethod === 'dice' ? '주사위' : '룰렛';
+    
+    // 결과 초기화
+    setResult(null);
+    setResultAnimating(false);
+    
+    // localStorage에서도 제거
+    if (meetingId) {
+      try {
+        localStorage.removeItem(`roulette_result_${meetingId}`);
+        console.log(`🗑️ ${gameType} 결과 초기화 완료`);
+      } catch (error) {
+        console.error(`${gameType} 결과 초기화 실패:`, error);
       }
+    }
+    
+    // 바로 새 게임 시작
+    setTimeout(() => {
+      startRandomSelection();
+    }, 100); // 상태 업데이트 후 게임 시작
+  };
+
+  // 결과 확정 함수
+  const handleConfirmResult = async () => {
+    if (!result || !result.selectedPlace) {
+      alert('선정 결과가 없습니다.');
+      return;
+    }
+
+    try {
+      const selectedPlace = result.selectedPlace;
+      
+      // 미팅 정보 업데이트
+      const updatedMeeting = {
+        ...meeting,
+        selectedPlace: {
+          id: selectedPlace.id,
+          name: selectedPlace.name,
+          category: selectedPlace.category,
+          address: selectedPlace.address || selectedPlace.location,
+          rating: selectedPlace.rating,
+          coordinates: selectedPlace.coordinates
+        },
+        selectionMethod: result.selectionMethod || 'random',
+        meetingStatus: 'completed',
+        participants: meeting?.participants || []
+      };
+
+      // 상위 컴포넌트에 업데이트 알림
+      if (onMeetingUpdate) {
+        onMeetingUpdate(updatedMeeting);
+      }
+
+      // 히스토리에 저장 (로그인 사용자만)
+      if (user && !user.isGuest) {
+        try {
+          await saveMeetingHistory(user, updatedMeeting);
+          alert(`🎉 ${selectedPlace.name}이(가) 최종 장소로 확정되었습니다!\n\n✅ 미팅 히스토리에 저장되었습니다.`);
+        } catch (historyError) {
+          alert(`🎉 ${selectedPlace.name}이(가) 최종 장소로 확정되었습니다!\n\n⚠️ 히스토리 저장에 실패했습니다. 대시보드에서 확인해주세요.`);
+        }
+      } else {
+        alert(`🎉 ${selectedPlace.name}이(가) 최종 장소로 확정되었습니다!`);
+      }
+      
+    } catch (error) {
+      console.error('결과 확정 중 오류:', error);
+      alert(`🎉 ${result.selectedPlace.name}이(가) 최종 장소로 확정되었습니다!`);
     }
   };
 
@@ -1416,7 +1632,7 @@ const RandomSelector = ({ meetingId, onLocationSelected }) => {
           <ScaleIcon className="h-6 w-6 mr-2 text-primary-600" />
           공정성 모드 선택
         </h3>
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+        <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
           {fairnessModes.map(mode => (
             <button
               key={mode.id}
@@ -1443,7 +1659,7 @@ const RandomSelector = ({ meetingId, onLocationSelected }) => {
                 // 모드 변경
                 setFairnessMode(mode.id);
               }}
-              className={`p-4 text-sm rounded-lg border-2 transition-all duration-300 hover:transform hover:scale-105 ${
+              className={`p-4 text-sm rounded-lg border-4 transition-all duration-300 hover:transform hover:scale-105 ${
                 fairnessMode === mode.id
                   ? 'border-primary-500 bg-primary-50 text-primary-700 transform scale-105 shadow-lg'
                   : 'border-gray-300 text-gray-600 hover:bg-gray-50 hover:border-gray-400'
@@ -1457,551 +1673,260 @@ const RandomSelector = ({ meetingId, onLocationSelected }) => {
         </div>
       </div>
 
-      {/* 선정 방식별 UI */}
+      {/* 선정 방식별 UI - Compact Layout */}
       <div className="bg-white rounded-lg shadow p-6">
-        {/* 룰렛 모드 */}
-        {fairnessMode === 'random' && (
-          <div className="flex flex-col items-center">
-            <div className="mb-4">
-              <div className="scale-75">
-                <WheelComponent 
-                  segments={candidatePlaces}
-                  onFinished={onWheelFinished}
-                  isSpinning={spinning}
-                  winningSegment={winningSegment}
-                  socket={socket}
-                  meetingId={meetingId}
-                />
-              </div>
-            </div>
-
-            <button
-              onClick={startRandomSelection}
-              disabled={spinning || candidatePlaces.length === 0}
-              className={`px-8 py-4 rounded-lg font-bold text-lg transition-all duration-300 w-full max-w-md ${
-                spinning 
-                  ? 'bg-yellow-500 text-white cursor-not-allowed animate-pulse' 
-                  : 'bg-gradient-to-r from-blue-500 to-purple-600 text-white hover:from-blue-600 hover:to-purple-700 hover:transform hover:scale-105 shadow-lg'
-              }`}
-            >
-              {spinning ? (
-                <span>🎲 룰렛 돌리는 중...</span>
-              ) : (
-                <span>
-                  🎯 {fairnessModes.find(m => m.id === fairnessMode)?.name}으로 선정하기
-                </span>
-              )}
-            </button>
-          </div>
-        )}
-
-        {/* 멀티플레이어 타이밍 게임 모드 */}
-        {fairnessMode === 'balanced' && (
-          <div className="flex flex-col items-center space-y-6">
-            <h3 className="text-xl font-bold text-gray-900 mb-4">🎮 멀티플레이어 타이밍 스톱 게임</h3>
-            
-            {!timingGameMode ? (
-              <div className="text-center space-y-4">
-                <div className="bg-purple-50 rounded-lg p-6 max-w-lg">
-                  <p className="text-purple-800 font-medium mb-2">🎯 게임 방법</p>
-                  <p className="text-sm text-purple-700">
-                    <strong>🔥 실시간 대전!</strong><br/>
-                    목표 시간이 공개되면<br/>
-                    모든 참가자가 동시에 타이머를 보면서<br/>
-                    목표 시간에 가장 가까운 순간에 <strong>STOP</strong>을 누르세요!<br/>
-                    <strong>가장 정확한 사람이 승리합니다!</strong>
-                  </p>
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+          {/* 게임 영역 */}
+          <div className="lg:col-span-2">
+            {/* 룰렛 모드 */}
+            {fairnessMode === 'random' && (
+              <div className="flex flex-col items-center space-y-3">
+                <h4 className="text-lg font-bold text-gray-900">🎯 룰렛 게임</h4>
+                <p className="text-sm text-gray-600 text-center">
+                  {result ? '중앙의 파란 원을 클릭하여 다시 도전하세요!' : '중앙의 파란 원을 클릭하여 룰렛을 시작하세요!'}
+                </p>
+                <div className="scale-75 origin-center">
+                  <WheelComponent 
+                    segments={candidatePlaces}
+                    onFinished={onWheelFinished}
+                    isSpinning={spinning}
+                    winningSegment={winningSegment}
+                    socket={socket}
+                    meetingId={meetingId}
+                    onCenterClick={() => {
+                      if (!spinning && candidatePlaces.length > 0) {
+                        startRandomSelection();
+                      }
+                    }}
+                  />
                 </div>
-                
-                <button
-                  onClick={startRandomSelection}
-                  disabled={candidatePlaces.length === 0}
-                  className="px-8 py-4 rounded-lg font-bold text-lg transition-all duration-300 w-full max-w-md bg-gradient-to-r from-purple-500 to-indigo-600 text-white hover:from-purple-600 hover:to-indigo-700 hover:transform hover:scale-105 shadow-lg"
-                >
-                  🎮 멀티플레이어 게임 시작!
-                </button>
               </div>
-            ) : (
-              <div className="w-full max-w-4xl space-y-6">
-                {gamePhase === 'running' && (
-                  <div className="space-y-6">
-                    {/* 목표 시간과 참가자 현황 */}
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                      <div className="bg-gradient-to-r from-yellow-50 to-orange-50 rounded-lg p-4 border-2 border-yellow-300">
-                        <h4 className="text-xl font-bold text-orange-900 mb-2">
-                          🎯 목표: {targetTime.toFixed(2)}초
-                        </h4>
-                        <p className="text-sm text-orange-700">모든 플레이어가 동시에 도전!</p>
-                      </div>
-                      
-                      <div className="bg-blue-50 rounded-lg p-4 border-2 border-blue-300">
-                        <h4 className="text-lg font-bold text-blue-900 mb-2">
-                          👥 참가자 ({gamePlayers.length}명)
-                        </h4>
-                        <div className="flex flex-wrap gap-1">
-                          {gamePlayers.map(player => (
-                            <span 
-                              key={player.id} 
-                              className={`px-2 py-1 rounded-full text-xs font-medium ${
-                                player.hasResult 
-                                  ? 'bg-green-100 text-green-800' 
-                                  : 'bg-gray-100 text-gray-700'
-                              }`}
-                            >
-                              {player.name} {player.hasResult && '✓'}
-                            </span>
-                          ))}
-                        </div>
-                      </div>
+            )}
+
+            {/* 주사위 모드 */}
+            {fairnessMode === 'dice' && (
+              <div className="space-y-3">
+                <h4 className="text-lg font-bold text-gray-900 text-center">🎲 3D 주사위</h4>
+                <p className="text-sm text-gray-600 text-center">
+                  {result ? '주사위를 클릭하여 다시 시작하세요!' : '주사위를 클릭하여 게임을 시작하세요!'}
+                </p>
+                
+                {/* 3D 주사위 캔버스 - 더 작게 */}
+                <div className="w-full max-w-xs mx-auto">
+                  <Dice3D 
+                    onResult={handle3DDiceResult}
+                    shouldRoll={shouldRoll3D}
+                    resetRoll={reset3DDice}
+                    onDiceClick={() => {
+                      if (!diceRolling && candidatePlaces.length > 0) {
+                        if (result) {
+                          // 결과가 있을 때는 다시 버튼과 동일하게 동작
+                          clearResult();
+                        } else {
+                          // 결과가 없을 때는 게임 시작
+                          startRandomSelection();
+                        }
+                      }
+                    }}
+                    isClickable={!diceRolling && candidatePlaces.length > 0}
+                    hasResult={!!result}
+                  />
+                </div>
+              </div>
+            )}
+
+            {/* 퀴즈 모드 */}
+            {fairnessMode === 'quiz' && (
+              <div className="space-y-3">
+                <h4 className="text-lg font-bold text-gray-900 text-center">🧠 스피드 퀴즈</h4>
+                
+                {!quizMode ? (
+                  <div className="text-center space-y-3">
+                    <div className="bg-blue-50 rounded-lg p-3">
+                      <p className="text-blue-800 font-medium mb-1 text-sm">💡 게임 방법</p>
+                      <p className="text-xs text-blue-700">
+                        후보 장소 중 하나에 대한 퀴즈가 출제됩니다.<br/>
+                        정답을 맞히면 해당 장소가 최종 선정됩니다!
+                      </p>
                     </div>
                     
-                    <div className="bg-gradient-to-r from-purple-50 to-indigo-50 rounded-lg p-8 border-2 border-purple-200">
-                      {/* 현재 타이머 */}
-                      {/* 시간 제한 표시 */}
-                      {gameTimeRemaining !== null && (
-                        <div className="mb-4 text-center">
-                          <p className="text-sm text-red-600 mb-2">⏰ 게임 자동 종료까지</p>
-                          <div className={`w-full bg-red-100 text-red-700 rounded-lg p-3 font-mono text-lg font-bold border-2 border-red-300 ${
-                            gameTimeRemaining <= 30000 ? 'animate-pulse' : ''
-                          }`}>
-                            {Math.ceil(gameTimeRemaining / 1000)}초
-                          </div>
-                        </div>
-                      )}
+                    {!result && (
+                      <button
+                        onClick={startRandomSelection}
+                        disabled={candidatePlaces.length === 0}
+                        className="px-6 py-3 rounded-lg font-bold text-sm transition-all duration-300 w-full max-w-xs mx-auto bg-gradient-to-r from-green-500 to-teal-600 text-white hover:from-green-600 hover:to-teal-700 hover:transform hover:scale-105 shadow-lg"
+                      >
+                        🧠 퀴즈 시작!
+                      </button>
+                    )}
+                  </div>
+                ) : (
+                  <div className="space-y-3">
+                    <div className="bg-gradient-to-r from-purple-50 to-pink-50 rounded-lg p-3 border-2 border-purple-200">
+                      <h5 className="text-sm font-bold text-purple-900 mb-2">❓ {currentQuiz.question}</h5>
                       
-                      <div className="mb-6 text-center">
-                        <p className="text-sm text-gray-600 mb-2">현재 시간</p>
-                        <div className={`w-full bg-black text-green-400 rounded-lg p-6 font-mono text-4xl font-bold border-4 border-gray-800 ${
-                          gameRunning ? 'animate-pulse shadow-2xl' : 'shadow-lg'
-                        }`}>
-                          {formatTime(currentTime)}
-                        </div>
-                      </div>
-                      
-                      <div className="text-center space-y-4">
-                        {!currentPlayer ? (
+                      <div className="grid grid-cols-1 gap-2">
+                        {currentQuiz.answers.map((answer, index) => (
                           <button
-                            onClick={joinMultiplayerTimingGame}
-                            className="px-12 py-4 rounded-lg font-bold text-xl bg-gradient-to-r from-green-500 to-emerald-600 text-white hover:from-green-600 hover:to-emerald-700 hover:transform hover:scale-105 shadow-lg"
-                          >
-                            🎮 게임 참가하기!
-                          </button>
-                        ) : (
-                          <button
-                            onClick={stopTimingGame}
-                            disabled={!gameRunning || gamePlayers.find(p => p.id === currentPlayer.id)?.hasResult}
-                            className={`px-16 py-6 rounded-lg font-bold text-2xl transition-all duration-300 ${
-                              gameRunning && !gamePlayers.find(p => p.id === currentPlayer.id)?.hasResult
-                                ? 'bg-gradient-to-r from-red-500 to-pink-600 text-white hover:from-red-600 hover:to-pink-700 hover:transform hover:scale-110 shadow-lg'
-                                : 'bg-gray-400 text-gray-200 cursor-not-allowed'
+                            key={index}
+                            onClick={() => setQuizAnswer(answer)}
+                            className={`p-2 rounded-lg border-2 transition-all text-left text-sm ${
+                              quizAnswer === answer
+                                ? 'border-purple-500 bg-purple-100 text-purple-800 font-bold'
+                                : 'border-gray-300 bg-white text-gray-700 hover:bg-gray-50'
                             }`}
                           >
-                            {gamePlayers.find(p => p.id === currentPlayer.id)?.hasResult ? '✓ 완료!' : '🛑 STOP!'}
+                            <span className="font-bold text-purple-600 mr-2">{String.fromCharCode(65 + index)}.</span>
+                            {answer}
                           </button>
-                        )}
+                        ))}
                       </div>
                     </div>
                     
-                    {/* 실시간 결과 현황 */}
-                    {gameResults.length > 0 && (
-                      <div className="bg-white rounded-lg p-6 border-2 border-gray-200">
-                        <h4 className="text-lg font-bold text-gray-900 mb-4">🏃‍♂️ 실시간 결과</h4>
-                        <div className="space-y-2">
-                          {gameResults.sort((a, b) => a.difference - b.difference).map((result, index) => (
-                            <div key={result.playerId} className={`flex justify-between items-center p-3 rounded-lg ${
-                              index === 0 ? 'bg-yellow-100 border border-yellow-300' : 'bg-gray-50'
-                            }`}>
-                              <div className="flex items-center space-x-2">
-                                <span className="font-bold text-lg">{index + 1}위</span>
-                                <span className="font-medium">{result.playerName}</span>
-                                {index === 0 && <span className="text-yellow-600">👑</span>}
-                              </div>
-                              <div className="text-right">
-                                <div className="font-mono text-sm">
-                                  {(result.stoppedTime/1000).toFixed(2)}초
-                                </div>
-                                <div className="text-xs text-gray-600">
-                                  차이: {result.difference}ms
-                                </div>
-                              </div>
-                            </div>
-                          ))}
-                        </div>
-                      </div>
-                    )}
-                    
-                    <div className="text-center">
-                      <button
-                        onClick={resetTimingGame}
-                        className="px-6 py-3 bg-gray-500 text-white rounded-lg hover:bg-gray-600 font-bold"
-                      >
-                        ❌ 게임 중단
-                      </button>
-                    </div>
-                  </div>
-                )}
-                
-                {gamePhase === 'stopped' && (
-                  <div className="text-center space-y-4">
-                    <div className="bg-gradient-to-r from-yellow-50 to-orange-50 rounded-lg p-6 border-2 border-yellow-300">
-                      <h4 className="text-lg font-bold text-orange-900 mb-4">
-                        ⏳ 다른 플레이어들의 결과를 기다리는 중...
-                      </h4>
-                      
-                      <div className="flex justify-center items-center space-x-8">
+                    <div className="flex justify-center space-x-2">
+                      {isQuizOwner ? (
+                        <>
+                          <button
+                            onClick={submitQuizAnswer}
+                            disabled={!quizAnswer}
+                            className="px-4 py-2 bg-green-500 text-white rounded-lg hover:bg-green-600 disabled:opacity-50 disabled:cursor-not-allowed font-bold text-sm"
+                          >
+                            ✅ 정답 제출
+                          </button>
+                          <button
+                            onClick={() => {
+                              setQuizMode(false);
+                              setCurrentQuiz(null);
+                              setQuizAnswer('');
+                              setIsQuizOwner(false);
+                            }}
+                            className="px-4 py-2 bg-gray-500 text-white rounded-lg hover:bg-gray-600 font-bold text-sm"
+                          >
+                            ❌ 취소
+                          </button>
+                        </>
+                      ) : (
                         <div className="text-center">
-                          <p className="text-sm text-gray-600">목표 시간</p>
-                          <div className="bg-yellow-200 rounded-lg p-4 font-mono text-xl font-bold">
-                            {targetTime.toFixed(2)}초
-                          </div>
+                          <p className="text-sm text-gray-600 bg-blue-50 p-2 rounded-lg border border-blue-200">
+                            👀 다른 사용자가 퀴즈를 진행 중입니다...
+                          </p>
                         </div>
-                        
-                        <div className="text-4xl">VS</div>
-                        
-                        <div className="text-center">
-                          <p className="text-sm text-gray-600">내 기록</p>
-                          <div className="bg-purple-200 rounded-lg p-4 font-mono text-xl font-bold">
-                            {(stoppedTime/1000).toFixed(2)}초
-                          </div>
-                        </div>
-                      </div>
-                      
-                      <p className="text-sm text-gray-600 mt-4">
-                        차이: {Math.abs(targetTime * 1000 - stoppedTime)}ms
-                      </p>
-                      
-                      <div className="mt-4">
-                        <p className="text-sm text-orange-700">
-                          완료: {gamePlayers.filter(p => p.hasResult).length} / {gamePlayers.length}명
-                        </p>
-                        <div className="w-full bg-orange-200 rounded-full h-2 mt-2">
-                          <div 
-                            className="bg-orange-500 h-2 rounded-full transition-all duration-300"
-                            style={{ width: `${(gamePlayers.filter(p => p.hasResult).length / gamePlayers.length) * 100}%` }}
-                          />
-                        </div>
-                      </div>
+                      )}
                     </div>
                   </div>
                 )}
-
-                {gamePhase === 'finished' && gameWinner && (
-                  <div className="text-center space-y-6">
-                    <div className="bg-gradient-to-r from-yellow-50 to-orange-50 rounded-lg p-8 border-2 border-yellow-300">
-                      <h4 className="text-2xl font-bold text-orange-900 mb-4">
-                        🏆 게임 완료!
-                      </h4>
-                      
-                      <div className="bg-yellow-100 rounded-lg p-6 mb-6 border border-yellow-300">
-                        <h5 className="text-xl font-bold text-yellow-900 mb-2">
-                          👑 우승자: {gameWinner.name}
-                        </h5>
-                        <div className="flex justify-center items-center space-x-4 text-lg">
-                          <span className="font-mono font-bold">{(gameWinner.stoppedTime/1000).toFixed(2)}초</span>
-                          <span className="text-gray-600">|</span>
-                          <span className="text-green-600 font-bold">차이: {gameWinner.difference}ms</span>
-                        </div>
-                      </div>
-                      
-                      <div className="bg-white rounded-lg p-4 border border-gray-200">
-                        <h6 className="font-bold text-gray-900 mb-3">📊 최종 순위</h6>
-                        <div className="space-y-2">
-                          {gameResults.map((result, index) => (
-                            <div key={result.id} className={`flex justify-between items-center p-3 rounded-lg ${
-                              index === 0 ? 'bg-yellow-100 border border-yellow-300' :
-                              index === 1 ? 'bg-gray-100 border border-gray-300' :
-                              index === 2 ? 'bg-orange-100 border border-orange-300' :
-                              'bg-gray-50'
-                            }`}>
-                              <div className="flex items-center space-x-3">
-                                <span className="font-bold text-lg">
-                                  {index === 0 ? '🥇' : index === 1 ? '🥈' : index === 2 ? '🥉' : `${index + 1}위`}
-                                </span>
-                                <span className="font-medium">{result.name}</span>
-                              </div>
-                              <div className="text-right">
-                                <div className="font-mono text-sm font-bold">
-                                  {(result.stoppedTime/1000).toFixed(2)}초
-                                </div>
-                                <div className="text-xs text-gray-600">
-                                  차이: {result.difference}ms
-                                </div>
-                              </div>
-                            </div>
-                          ))}
-                        </div>
-                      </div>
-                    </div>
-                    
-                    <button
-                      onClick={resetTimingGame}
-                      className="px-8 py-3 bg-purple-600 text-white rounded-lg hover:bg-purple-700 font-bold"
-                    >
-                      🎮 새 게임 시작하기
-                    </button>
-                  </div>
-                )}
               </div>
             )}
           </div>
-        )}
 
-        {/* 주사위 모드 */}
-        {fairnessMode === 'dice' && (
-          <div className="flex flex-col items-center space-y-6">
-            <h3 className="text-xl font-bold text-gray-900 mb-4">🎲 운명의 3D 주사위</h3>
-            
-            {/* 3D 주사위 캔버스 */}
-            <div className="w-full max-w-4xl">
-              <Dice3D 
-                onResult={handle3DDiceResult}
-                shouldRoll={shouldRoll3D}
-                resetRoll={reset3DDice}
-              />
-            </div>
-
-            {/* 장소별 주사위 번호 매핑 표시 */}
-            {!diceRolling && (
-              <div className="w-full max-w-4xl">
-                <div className="bg-blue-50 rounded-lg p-4 mb-4">
-                  <h4 className="text-lg font-bold text-blue-900 mb-2">🎯 주사위 번호 매핑</h4>
-                  <p className="text-sm text-blue-700">각 숫자가 나오면 해당하는 장소가 선정됩니다!</p>
-                </div>
-                
-                <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
-                  {candidatePlaces.slice(0, 6).map((place, index) => {
-                    const diceNum = (index % 6) + 1;
-                    const diceSymbols = ['⚀', '⚁', '⚂', '⚃', '⚄', '⚅'];
-                    return (
-                      <div key={place.id} className={`rounded-lg p-4 flex items-center space-x-3 transition-all ${
-                        diceResult === diceNum 
-                          ? 'bg-yellow-200 border-2 border-yellow-500 shadow-lg transform scale-105' 
-                          : 'bg-gray-50 border border-gray-200'
-                      }`}>
-                        <div className="text-3xl">
-                          {diceSymbols[diceNum - 1]}
-                        </div>
-                        <div className="flex items-center space-x-2 min-w-0 flex-1">
-                          <span className="text-lg">{place.avatar}</span>
-                          <span className="font-medium text-sm truncate">{place.name}</span>
-                        </div>
-                      </div>
-                    );
-                  })}
-                </div>
-              </div>
-            )}
-
-            <button
-              onClick={startRandomSelection}
-              disabled={diceRolling || candidatePlaces.length === 0}
-              className={`px-8 py-4 rounded-lg font-bold text-lg transition-all duration-300 w-full max-w-md ${
-                diceRolling 
-                  ? 'bg-yellow-500 text-white cursor-not-allowed animate-pulse'
-                  : 'bg-gradient-to-r from-red-500 to-pink-600 text-white hover:from-red-600 hover:to-pink-700 hover:transform hover:scale-105 shadow-lg'
-              }`}
-            >
-              {diceRolling ? (
-                <span>🎲 3D 주사위 굴리는 중...</span>
-              ) : (
-                <span>🎲 운명의 3D 주사위 굴리기!</span>
-              )}
-            </button>
-          </div>
-        )}
-
-        {/* 퀴즈 모드 */}
-        {fairnessMode === 'quiz' && (
-          <div className="flex flex-col items-center space-y-6">
-            <h3 className="text-xl font-bold text-gray-900 mb-4">🧠 스피드 퀴즈 대결</h3>
-            
-            {!quizMode ? (
-              <div className="text-center space-y-4">
-                <div className="bg-blue-50 rounded-lg p-6 max-w-md">
-                  <p className="text-blue-800 font-medium mb-2">💡 게임 방법</p>
-                  <p className="text-sm text-blue-700">
-                    후보 장소 중 하나에 대한 퀴즈가 출제됩니다.<br/>
-                    정답을 맞히면 해당 장소가 최종 선정됩니다!
-                  </p>
-                </div>
-                
-                <button
-                  onClick={startRandomSelection}
-                  disabled={candidatePlaces.length === 0}
-                  className="px-8 py-4 rounded-lg font-bold text-lg transition-all duration-300 w-full max-w-md bg-gradient-to-r from-green-500 to-teal-600 text-white hover:from-green-600 hover:to-teal-700 hover:transform hover:scale-105 shadow-lg"
-                >
-                  🧠 퀴즈 시작하기!
-                </button>
-              </div>
-            ) : (
-              <div className="w-full max-w-2xl space-y-6">
-                <div className="bg-gradient-to-r from-purple-50 to-pink-50 rounded-lg p-6 border-2 border-purple-200">
-                  <h4 className="text-lg font-bold text-purple-900 mb-4">❓ {currentQuiz.question}</h4>
-                  
-                  <div className="grid grid-cols-2 gap-3">
-                    {currentQuiz.answers.map((answer, index) => (
-                      <button
-                        key={index}
-                        onClick={() => setQuizAnswer(answer)}
-                        className={`p-4 rounded-lg border-2 transition-all text-left ${
-                          quizAnswer === answer
-                            ? 'border-purple-500 bg-purple-100 text-purple-800 font-bold'
-                            : 'border-gray-300 bg-white text-gray-700 hover:bg-gray-50'
-                        }`}
-                      >
-                        <span className="font-bold text-purple-600 mr-2">{String.fromCharCode(65 + index)}.</span>
-                        {answer}
-                      </button>
-                    ))}
-                  </div>
-                </div>
-                
-                <div className="flex justify-center space-x-4">
-                  <button
-                    onClick={submitQuizAnswer}
-                    disabled={!quizAnswer}
-                    className="px-6 py-3 bg-green-500 text-white rounded-lg hover:bg-green-600 disabled:opacity-50 disabled:cursor-not-allowed font-bold"
-                  >
-                    ✅ 정답 제출
-                  </button>
-                  <button
-                    onClick={() => {
-                      setQuizMode(false);
-                      setCurrentQuiz(null);
-                      setQuizAnswer('');
-                    }}
-                    className="px-6 py-3 bg-gray-500 text-white rounded-lg hover:bg-gray-600 font-bold"
-                  >
-                    ❌ 취소
-                  </button>
-                </div>
-              </div>
-            )}
-          </div>
-        )}
-      </div>
-
-      {/* 결과 표시 영역 */}
-      {result && !spinning && !diceRolling && !quizMode && !timingGameMode && (
-        <div className={`bg-gradient-to-r from-yellow-50 to-orange-50 border-2 border-yellow-300 rounded-lg p-6 shadow-2xl ${
-          resultAnimating ? 'animate-pulse' : ''
-        }`}>
-          <div className="text-center space-y-6">
-            {/* 복원된 결과인지 표시 */}
-            {result.isRestoredResult && (
-              <div className="mb-2">
-                <span className="inline-flex items-center px-3 py-1 rounded-full text-sm font-medium bg-blue-100 text-blue-800">
-                  📋 최근 선정 결과
-                </span>
-              </div>
-            )}
-            
-            {/* 축하 메시지 */}
-            <div className="relative">
-              {resultAnimating && (
-                <div className="absolute -inset-8 flex items-center justify-center pointer-events-none">
-                  <div className="text-6xl animate-bounce">🎉</div>
-                  <div className="text-6xl animate-bounce animation-delay-150">✨</div>
-                  <div className="text-6xl animate-bounce animation-delay-300">🎊</div>
-                </div>
-              )}
-              
-              <div className="flex items-center justify-center mb-4">
-                <TrophyIcon className={`h-12 w-12 text-yellow-500 mr-4 ${resultAnimating ? 'animate-spin' : ''}`} />
-                <div>
-                  <h4 className="text-2xl font-bold text-gray-900 mb-1">
-                    🎉 축하합니다! 🎉
-                  </h4>
-                  <p className="text-lg text-gray-700">
-                    오늘의 운명은 <span className="text-2xl font-bold text-primary-600">{result.selectedPlace.name}</span>입니다!
-                  </p>
-                </div>
-              </div>
-            </div>
-
-            {/* AI 소개 카드 */}
-            <div className="bg-white/80 backdrop-blur-sm rounded-xl p-6 border border-yellow-200 shadow-lg">
-              <div className="flex items-start space-x-4">
-                <div className="text-4xl">{result.selectedPlace.avatar}</div>
-                <div className="flex-1 text-left">
-                  <h5 className="font-bold text-lg text-gray-900 mb-2">{result.selectedPlace.name}</h5>
-                  <div className="space-y-2 text-sm text-gray-600">
-                    <div className="flex items-center space-x-2">
-                      <span className="font-medium">📍 위치:</span>
-                      <span>{result.selectedPlace.address || '주소 정보 없음'}</span>
-                    </div>
-                    <div className="flex items-center space-x-2">
-                      <span className="font-medium">🏷️ 카테고리:</span>
-                      <span className="bg-blue-100 text-blue-800 px-2 py-1 rounded-full text-xs">
-                        {result.selectedPlace.category}
+          {/* 컨트롤 및 결과 영역 */}
+          <div className="space-y-4">
+            {/* 결과 표시 영역 - Compact */}
+            {result && !spinning && !diceRolling && !quizMode && (
+              <div className="space-y-3">
+                <h5 className="text-sm font-bold text-gray-900">🏆 선정 결과</h5>
+                <div className={`bg-gradient-to-r from-yellow-50 to-orange-50 border-2 border-yellow-300 rounded-lg p-4 ${
+                  resultAnimating ? 'animate-pulse' : ''
+                }`}>
+                  {/* 복원된 결과인지 표시 */}
+                  {result.isRestoredResult && (
+                    <div className="mb-2">
+                      <span className="inline-flex items-center px-2 py-1 rounded-full text-xs font-medium bg-blue-100 text-blue-800">
+                        📋 최근 결과
                       </span>
                     </div>
-                    <div className="flex items-center space-x-2">
-                      <span className="font-medium">⭐ 평점:</span>
-                      <span>{result.selectedPlace.rating ? `${result.selectedPlace.rating}점` : '평점 정보 없음'}</span>
+                  )}
+                  
+                  {/* 선정된 장소 정보 */}
+                  <div className="bg-white/80 backdrop-blur-sm rounded-lg p-3 border border-yellow-200">
+                                          <div className="flex items-center space-x-2 mb-2">
+                        <div className="text-2xl">{result.selectedPlace.avatar}</div>
+                        <div className="flex-1 min-w-0">
+                          <h6 className="font-bold text-sm text-gray-900 truncate">{result.selectedPlace.name}</h6>
+                        </div>
+                      </div>
+                    
+                    <div className="grid grid-cols-2 gap-2 text-xs text-gray-600">
+                      <div className="flex items-center space-x-1">
+                        <span>🏷️</span>
+                        <span className="bg-blue-100 text-blue-800 px-1 py-0.5 rounded text-xs">
+                          {result.selectedPlace.category}
+                        </span>
+                      </div>
+                      <div className="flex items-center space-x-1">
+                        <span>🗳️</span>
+                        <span>{result.selectedPlace.votes}표</span>
+                      </div>
                     </div>
-                    <div className="flex items-center space-x-2">
-                      <span className="font-medium">🗳️ 투표수:</span>
-                      <span>{result.selectedPlace.votes}표</span>
+                    
+                    {/* 선정 방식별 메시지 */}
+                    <div className="mt-2 p-2 bg-gradient-to-r from-blue-50 to-purple-50 rounded-lg border border-blue-200">
+                      <p className="text-xs font-medium text-blue-800">
+                        {result.selectionMethod === 'dice' && '🎲 주사위의 선택'}
+                        {result.selectionMethod === 'quiz' && '🧠 퀴즈 정답 보상'}
+                        {result.selectionMethod === 'timing' && '⏱️ 타이밍 게임 승리'}
+                        {!result.selectionMethod && '🎯 룰렛의 선택'}
+                      </p>
                     </div>
                   </div>
                   
-                  {/* 선정 방식별 메시지 */}
-                  <div className="mt-4 p-3 bg-gradient-to-r from-blue-50 to-purple-50 rounded-lg border border-blue-200">
-                    <p className="text-sm font-medium text-blue-800">
-                      {result.selectionMethod === 'dice' && '🎲 주사위의 선택'}
-                      {result.selectionMethod === 'quiz' && '🧠 퀴즈 정답 보상'}
-                      {result.selectionMethod === 'timing' && '⏱️ 타이밍 게임 승리'}
-                      {!result.selectionMethod && '🎯 룰렛의 선택'}
-                    </p>
-                    <p className="text-xs text-blue-600 mt-1">
-                      {result.message}
-                    </p>
+                  {/* 액션 버튼들 - 더 작게 */}
+                  <div className="flex justify-center space-x-2 mt-3">
+                    <button
+                      onClick={startRandomSelection}
+                      disabled={spinning || diceRolling || quizMode || candidatePlaces.length === 0}
+                      className="px-3 py-2 bg-gradient-to-r from-blue-500 to-blue-600 text-white rounded-lg hover:from-blue-600 hover:to-blue-700 transition-all duration-200 font-bold flex items-center gap-1 text-xs"
+                    >
+                      🎯 다시
+                    </button>
+                    {isOwner && (
+                      <button
+                        onClick={handleConfirmResult}
+                        className="px-3 py-2 bg-gradient-to-r from-yellow-500 to-orange-500 text-white rounded-lg hover:from-yellow-600 hover:to-orange-600 transition-all duration-200 font-bold flex items-center gap-1 text-xs shadow-md"
+                      >
+                        <TrophyIcon className="h-3 w-3" />
+                        결과 확정
+                      </button>
+                    )}
                   </div>
                 </div>
               </div>
-            </div>
-            
-            {/* 액션 버튼들 */}
-            <div className="flex justify-center space-x-4">
-                              <button
-                  onClick={startRandomSelection}
-                  disabled={spinning || diceRolling || quizMode || candidatePlaces.length === 0}
-                  className="px-6 py-3 bg-gradient-to-r from-blue-500 to-blue-600 text-white rounded-lg hover:from-blue-600 hover:to-blue-700 transition-all duration-200 font-bold flex items-center gap-2 shadow-lg hover:shadow-xl transform hover:scale-105"
-                >
-                  🎯 다시 도전하기
-                </button>
-              <button
-                onClick={clearResult}
-                className="px-6 py-3 bg-gradient-to-r from-gray-500 to-gray-600 text-white rounded-lg hover:from-gray-600 hover:to-gray-700 transition-all duration-200 font-bold flex items-center gap-2 shadow-lg hover:shadow-xl transform hover:scale-105"
-              >
-                🗑️ 결과 초기화
-              </button>
-            </div>
+            )}
 
-            {/* 공유 버튼 (추가 기능) */}
-            <div className="pt-4 border-t border-yellow-200">
-              <button
-                onClick={() => {
-                  const shareText = `🎉 "${result.selectedPlace.name}"이(가) 선정되었습니다!\n\n📍 ${result.selectedPlace.address}\n⭐ ${result.selectedPlace.rating}점\n\n#wherewemeets #장소선정`;
-                  if (navigator.share) {
-                    navigator.share({
-                      title: '장소 선정 결과',
-                      text: shareText
-                    });
-                  } else {
-                    navigator.clipboard.writeText(shareText);
-                    alert('결과가 클립보드에 복사되었습니다!');
-                  }
-                }}
-                className="text-sm text-blue-600 hover:text-blue-800 font-medium flex items-center gap-1 mx-auto"
-              >
-                📱 결과 공유하기
-              </button>
-            </div>
+                         {/* 참가자 목록 - 간소화 */}
+             {candidatePlaces.length > 0 && (
+               <div className="space-y-2">
+                 <h5 className="text-sm font-bold text-gray-900">👥 후보 장소 ({candidatePlaces.length}개)</h5>
+                 <div className={`space-y-1 ${candidatePlaces.length > 7 ? 'max-h-56 overflow-y-auto' : ''}`}>
+                   {candidatePlaces.map((place, index) => (
+                     <div key={place.id} className={`flex items-center justify-between p-2 rounded-lg text-xs ${getParticipantColor(index)}`}>
+                       <div className="flex items-center space-x-2 min-w-0 flex-1">
+                         <span className="text-sm">{place.avatar}</span>
+                         <span className="font-medium truncate">{place.name}</span>
+                       </div>
+                       <div className="flex items-center space-x-1 text-xs">
+                         <span>🗳️ {place.votes}</span>
+                         {place.selectedCount > 0 && (
+                           <span className="bg-yellow-100 text-yellow-800 px-1 py-0.5 rounded">
+                             선정 {place.selectedCount}회
+                           </span>
+                         )}
+                       </div>
+                     </div>
+                   ))}
+                 </div>
+                 {candidatePlaces.length > 7 && (
+                   <div className="text-center">
+                     <p className="text-xs text-gray-500 italic">
+                       📜 스크롤하여 더 많은 장소를 확인하세요
+                     </p>
+                   </div>
+                 )}
+               </div>
+             )}
           </div>
         </div>
-      )}
+      </div>
     </div>
   );
 };
