@@ -172,7 +172,16 @@ const AIAssistant = ({ meetingData, onPlaceRecommendation }) => {
                                  inputMessage.toLowerCase().includes('맛집') ||
                                  inputMessage.toLowerCase().includes('공원') ||
                                  inputMessage.toLowerCase().includes('만날') ||
-                                 inputMessage.toLowerCase().includes('미팅');
+                                 inputMessage.toLowerCase().includes('미팅') ||
+                                 inputMessage.toLowerCase().includes('위스키') ||
+                                 inputMessage.toLowerCase().includes('술집') ||
+                                 inputMessage.toLowerCase().includes('바') ||
+                                 inputMessage.toLowerCase().includes('펍') ||
+                                 inputMessage.toLowerCase().includes('호프') ||
+                                 inputMessage.toLowerCase().includes('칵테일') ||
+                                 inputMessage.toLowerCase().includes('맥주') ||
+                                 inputMessage.toLowerCase().includes('소주') ||
+                                 inputMessage.toLowerCase().includes('와인');
 
     // 게스트 사용자 사용량 체크
     if (userLevel === USER_LEVELS.GUEST && isPlaceRecommendation) {

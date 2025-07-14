@@ -240,6 +240,7 @@ async function extractUserInfo(req) {
 function categorizeQuery(message, queryType) {
   const keywords = {
     place_food: ['맛집', '음식점', '레스토랑', '카페', '커피', '분식', '치킨', '피자', '햄버거', '한식', '중식', '일식', '양식'],
+    place_drinks: ['술집', '위스키', '맥주', '소주', '칵테일', '와인', '바', '펍', '호프', '이자카야', '포차', '주점', '양주'],
     place_activity: ['놀', '활동', '체험', '볼링', '노래방', 'pc방', '영화', '공연', '전시', '박물관', '놀이'],
     place_outdoor: ['공원', '산책', '피크닉', '등산', '강변', '해변', '야외', '자연'],
     place_shopping: ['쇼핑', '백화점', '마트', '시장', '아울렛', '쇼핑몰'],
@@ -743,8 +744,22 @@ function extractKeywords(message) {
     category = '양식';
   } else if (message.includes('카페') || message.includes('커피') || message.includes('디저트') || message.includes('베이커리')) {
     category = '카페';
-  } else if (message.includes('술집') || message.includes('호프') || message.includes('펜션') || message.includes('바')) {
-    category = '술집';
+  } else if (message.includes('술집') || message.includes('호프') || message.includes('펜션') || message.includes('바') || 
+             message.includes('위스키') || message.includes('소주') || message.includes('맥주') || message.includes('양주') ||
+             message.includes('칵테일') || message.includes('와인') || message.includes('술') || message.includes('주점') ||
+             message.includes('이자카야') || message.includes('포차') || message.includes('룸바') || message.includes('펍')) {
+    // 구체적인 주류명이 포함된 경우 더 정확한 검색어 사용
+    if (message.includes('위스키')) {
+      category = '위스키바';
+    } else if (message.includes('칵테일')) {
+      category = '칵테일바';
+    } else if (message.includes('와인')) {
+      category = '와인바';
+    } else if (message.includes('맥주')) {
+      category = '맥주집';
+    } else {
+      category = '술집';
+    }
   } else if (message.includes('치킨') || message.includes('족발') || message.includes('보쌈')) {
     category = '치킨';
   } else if (message.includes('음식점') || message.includes('맛집') || message.includes('식당') || message.includes('레스토랑')) {
@@ -1068,6 +1083,15 @@ router.post('/chat', async (req, res) => {
                                  message.toLowerCase().includes('공원') ||
                                  message.toLowerCase().includes('만날') ||
                                  message.toLowerCase().includes('미팅') ||
+                                 message.toLowerCase().includes('위스키') ||
+                                 message.toLowerCase().includes('술집') ||
+                                 message.toLowerCase().includes('바') ||
+                                 message.toLowerCase().includes('펍') ||
+                                 message.toLowerCase().includes('호프') ||
+                                 message.toLowerCase().includes('칵테일') ||
+                                 message.toLowerCase().includes('맥주') ||
+                                 message.toLowerCase().includes('소주') ||
+                                 message.toLowerCase().includes('와인') ||
                                  context?.isPlaceRecommendation;
 
     // 로그인 사용자의 경우 AI 추천 사용 제한 확인
@@ -1114,23 +1138,30 @@ router.post('/chat', async (req, res) => {
 
 ⚠️ 중요 규칙:
 - 사용자가 "분식집"을 요청하면 오직 분식집만 추천하세요 (떡볶이, 김밥, 순대 등)
+- 사용자가 "위스키 파는곳"을 요청하면 오직 술집/바만 추천하세요 (위스키 전문점, 펍, 호프집 등)
 - 사용자가 "효창공원역 부근"을 요청하면 효창공원역 근처 장소만 추천하세요
 - "예약", "가격대", "영업시간", "주차", "교통" 등의 정보성 항목은 절대 "* 항목명:" 형식으로 작성하지 마세요
 - 오직 실제 존재하는 장소의 이름만 "* 장소명:" 형식으로 작성하세요
+
+카테고리별 추천 가이드:
+- 위스키/주류: 위스키 전문점, 칵테일 바, 펍, 호프집, 이자카야
+- 분식: 떡볶이, 김밥, 순대, 만두 전문점
+- 카페: 커피전문점, 디저트카페, 브런치카페
+- 음식점: 한식, 중식, 일식, 양식 등 식사 장소
 
 올바른 응답 형식:
 * 장소명: 해당 장소의 특징이나 분위기를 설명하는 한 줄 코멘트
 * 다른장소명: 해당 장소만의 매력이나 추천 이유를 간단히 설명
 
-올바른 예시 (분식집 요청 시):
-* 김밥천국 효창공원점: 저렴하고 빠른 분식 메뉴로 학생들에게 인기 있는 곳
-* 떡볶이신당 남영역점: 매콤한 떡볶이와 튀김으로 유명한 분식 전문점
-* 현선이네 용산본점: 정통 떡볶이와 순대로 유명한 효창공원역 근처 분식집
+올바른 예시 (위스키 파는곳 요청 시):
+* 맥스 위스키바 용산점: 다양한 종류의 위스키와 칵테일을 즐길 수 있는 전문 바
+* 호프하우스 남영역점: 생맥주와 위스키를 함께 즐길 수 있는 펍
+* 블루노트 효창점: 위스키와 재즈 음악을 즐길 수 있는 분위기 좋은 바
 
 잘못된 예시 (절대 하지 마세요):
 * 예약: 전화로 미리 예약하세요
 * 가격대: 1만원~2만원 정도입니다
-* 청호손칼국수: 칼국수 전문점 (분식집이 아님)
+* 스타벅스: 커피전문점 (위스키를 파는 곳이 아님)
 
 추가 정보가 필요하면 장소 추천 후 별도 문단으로 작성하세요.
 
