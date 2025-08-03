@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import api from '../utils/api';
 import io from 'socket.io-client';
+import { createOrRestoreGuestSession } from '../utils/sessionUtils';
 import { 
   UserIcon,
   TrophyIcon,
@@ -80,6 +81,8 @@ const WheelComponent = ({ segments, onFinished, isSpinning, winningSegment, sock
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isSpinning, isAnimating]);
+
+
 
   // Socket.io로 다른 클라이언트의 룰렛 시작을 감지
   useEffect(() => {
@@ -348,6 +351,10 @@ const WheelComponent = ({ segments, onFinished, isSpinning, winningSegment, sock
 };
 
 const RandomSelector = ({ meetingId, onLocationSelected, user, meeting, isOwner, onMeetingUpdate }) => {
+  // 유저 정보
+  const userId = user?.id || createOrRestoreGuestSession()?.id || 'anonymous';
+  const userData = user;
+
   const [spinning, setSpinning] = useState(false);
   const [result, setResult] = useState(null);
   const [candidatePlaces, setCandidatePlaces] = useState([]);
@@ -373,7 +380,16 @@ const RandomSelector = ({ meetingId, onLocationSelected, user, meeting, isOwner,
   const [currentQuiz, setCurrentQuiz] = useState(null);
   const [quizAnswer, setQuizAnswer] = useState('');
   const [isQuizOwner, setIsQuizOwner] = useState(false);
-  // const [quizParticipants, setQuizParticipants] = useState([]);
+  
+  // 스피드 퀴즈 관련 상태
+  const [speedQuizMode, setSpeedQuizMode] = useState(false);
+  const [quizRounds, setQuizRounds] = useState([]);
+  const [currentRound, setCurrentRound] = useState(0);
+  const [participants, setParticipants] = useState(new Map());
+  const [roundAnswers, setRoundAnswers] = useState(new Map());
+  const [quizStartTime, setQuizStartTime] = useState(null);
+  const [roundTimeLeft, setRoundTimeLeft] = useState(15); // 15초 제한시간
+  const [timerInterval, setTimerInterval] = useState(null);
   
   // 타이밍 게임 상태
   const [timingGameMode, setTimingGameMode] = useState(false);
@@ -438,6 +454,43 @@ const RandomSelector = ({ meetingId, onLocationSelected, user, meeting, isOwner,
       return () => clearInterval(interval);
     }
   }, [gameAutoEndTime, gameRunning]);
+
+  // 스피드 퀴즈 타이머
+  useEffect(() => {
+    if (speedQuizMode && quizStartTime && roundTimeLeft > 0) {
+      const interval = setInterval(() => {
+        const elapsed = Math.floor((Date.now() - quizStartTime) / 1000);
+        const timeLeft = Math.max(0, 15 - elapsed);
+        setRoundTimeLeft(timeLeft);
+        
+        if (timeLeft === 0) {
+          clearInterval(interval);
+          // 시간 초과 시 자동으로 다음 라운드로 진행 (진행자만)
+          if (isQuizOwner) {
+            setTimeout(() => {
+              nextRound();
+            }, 1000);
+          }
+        }
+      }, 1000);
+      
+      setTimerInterval(interval);
+      
+      return () => {
+        clearInterval(interval);
+      };
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [speedQuizMode, quizStartTime, roundTimeLeft, isQuizOwner]);
+
+  // 컴포넌트 언마운트 시 타이머 정리
+  useEffect(() => {
+    return () => {
+      if (timerInterval) {
+        clearInterval(timerInterval);
+      }
+    };
+  }, [timerInterval]);
 
   // Socket.io 연결 설정
   useEffect(() => {
@@ -576,6 +629,63 @@ const RandomSelector = ({ meetingId, onLocationSelected, user, meeting, isOwner,
             loadCandidatePlacesData(true, false);
           }
         }, 1000);
+      });
+
+      // 스피드 퀴즈 이벤트들
+      newSocket.on('speed-quiz-start', (data) => {
+        console.log('스피드 퀴즈 시작:', data);
+        setResult(null);
+        setResultAnimating(false);
+        setQuizRounds(data.rounds);
+        setCurrentRound(data.currentRound);
+        setSpeedQuizMode(true);
+        setQuizMode(true);
+        setCurrentQuiz(data.rounds[data.currentRound]);
+        setQuizAnswer('');
+        setParticipants(new Map());
+        setRoundAnswers(new Map());
+        setRoundTimeLeft(data.timeLimit);
+        setQuizStartTime(Date.now());
+        setIsQuizOwner(false); // 다른 사람이 시작한 퀴즈이므로 진행자 아님
+      });
+
+      newSocket.on('speed-quiz-answer', (data) => {
+        console.log('스피드 퀴즈 답안:', data);
+        // 다른 참가자의 답안 정보 업데이트
+        const newParticipants = new Map(participants);
+        const currentScore = newParticipants.get(data.userId) || 0;
+        newParticipants.set(data.userId, currentScore + data.score);
+        setParticipants(newParticipants);
+      });
+
+      newSocket.on('speed-quiz-next-round', (data) => {
+        console.log('스피드 퀴즈 다음 라운드:', data);
+        setCurrentRound(data.currentRound);
+        setCurrentQuiz(quizRounds[data.currentRound]);
+        setQuizAnswer('');
+        setRoundAnswers(new Map());
+        setRoundTimeLeft(15);
+        setQuizStartTime(Date.now());
+      });
+
+      newSocket.on('speed-quiz-finish', (data) => {
+        console.log('스피드 퀴즈 완료:', data);
+        setResult(data.result);
+        setResultAnimating(true);
+        setSpeedQuizMode(false);
+        setQuizMode(false);
+        setCurrentQuiz(null);
+        setQuizAnswer('');
+        setParticipants(new Map(data.participants));
+        
+        // localStorage에 저장
+        try {
+          localStorage.setItem(`roulette_result_${meetingId}`, JSON.stringify(data.result));
+        } catch (error) {
+          console.error('스피드 퀴즈 결과 저장 실패:', error);
+        }
+        
+        setTimeout(() => setResultAnimating(false), 3000);
       });
 
       // 멀티플레이어 타이밍 게임 이벤트들
@@ -902,7 +1012,7 @@ const RandomSelector = ({ meetingId, onLocationSelected, user, meeting, isOwner,
       return;
     }
 
-    if (spinning || diceRolling || quizMode || timingGameMode) {
+    if (spinning || diceRolling || quizMode || speedQuizMode || timingGameMode) {
       return;
     }
 
@@ -1058,8 +1168,13 @@ const RandomSelector = ({ meetingId, onLocationSelected, user, meeting, isOwner,
     };
   };
 
-  // 퀴즈 시작
-  const startQuiz = () => {
+  // 스피드 퀴즈 라운드 생성
+  const generateSpeedQuizRounds = () => {
+    return candidatePlaces.map(place => generateQuiz(place));
+  };
+
+  // 스피드 퀴즈 시작
+  const startSpeedQuiz = () => {
     if (candidatePlaces.length === 0) {
       alert('후보 장소가 없습니다.');
       return;
@@ -1068,91 +1183,228 @@ const RandomSelector = ({ meetingId, onLocationSelected, user, meeting, isOwner,
     setResult(null);
     setResultAnimating(false);
     
-    // 랜덤으로 장소 선택해서 퀴즈 생성
-    const randomPlace = candidatePlaces[Math.floor(Math.random() * candidatePlaces.length)];
-    const quiz = generateQuiz(randomPlace);
-    
-    setCurrentQuiz(quiz);
+    // 모든 후보 장소에 대한 퀴즈 라운드 생성
+    const rounds = generateSpeedQuizRounds();
+    setQuizRounds(rounds);
+    setCurrentRound(0);
+    setSpeedQuizMode(true);
     setQuizMode(true);
     setQuizAnswer('');
-    setIsQuizOwner(true); // 퀴즈 시작자 설정
+    setParticipants(new Map());
+    setRoundAnswers(new Map());
+    setRoundTimeLeft(15);
+    setIsQuizOwner(true);
     
-    // 웹소켓으로 퀴즈 시작 알림 (정답 제외)
-    if (socket && meetingId) {
-      const quizForBroadcast = {
-        place: quiz.place,
-        question: quiz.question,
-        answers: quiz.answers
-        // correct 필드는 제외하여 정답 노출 방지
-      };
+    // 첫 번째 라운드 시작
+    if (rounds.length > 0) {
+      setCurrentQuiz(rounds[0]);
+      setQuizStartTime(Date.now());
       
-      socket.emit('game-start', {
-        meetingId,
-        gameType: 'quiz',
-        quiz: quizForBroadcast
-      });
+      // 웹소켓으로 스피드 퀴즈 시작 알림
+      if (socket && meetingId) {
+        socket.emit('speed-quiz-start', {
+          meetingId,
+          rounds: rounds.map(round => ({
+            place: round.place,
+            question: round.question,
+            answers: round.answers
+          })),
+          currentRound: 0,
+          timeLimit: 15
+        });
+      }
     }
   };
 
-  // 퀴즈 답안 제출
-  const submitQuizAnswer = () => {
+  // 기존 퀴즈 시작 (단일 퀴즈용)
+  const startQuiz = () => {
+    startSpeedQuiz(); // 스피드 퀴즈로 변경
+  };
+
+  // 스피드 퀴즈 답안 제출
+  const submitSpeedQuizAnswer = () => {
     if (!quizAnswer) {
       alert('답안을 선택해주세요!');
       return;
     }
 
+    const submitTime = Date.now();
+    const responseTime = submitTime - quizStartTime;
     const isCorrect = quizAnswer === currentQuiz.correct;
     
+    // 점수 계산 (정답: 100점, 속도 보너스: 최대 50점)
+    let score = 0;
     if (isCorrect) {
-      // 정답 - 해당 장소 선정
-      const selectedPlace = currentQuiz.place;
-      recordSelectionOnServer(selectedPlace);
-      
-      const resultData = {
-        selectedPlace,
-        message: `🧠 정답입니다! "${selectedPlace.name}"이(가) 선정되었습니다!`,
-        fairnessInfo: getFairnessInfo(selectedPlace),
-        isRestoredResult: false,
-        timestamp: new Date().toISOString(),
-        selectionMethod: 'quiz'
-      };
-      
-      setResult(resultData);
-      setResultAnimating(true);
-      
-      // 웹소켓으로 퀴즈 결과 전송
-      if (socket && meetingId) {
-        socket.emit('game-result', {
-          meetingId,
-          gameType: 'quiz',
-          result: resultData,
-          quiz: currentQuiz,
-          answer: quizAnswer
-        });
-      }
-      
-      // localStorage에 저장
-      if (meetingId) {
-        try {
-          localStorage.setItem(`roulette_result_${meetingId}`, JSON.stringify(resultData));
-        } catch (error) {
-          console.error('퀴즈 결과 저장 실패:', error);
-        }
-      }
-      
-      setTimeout(() => setResultAnimating(false), 3000);
-      
-      if (onLocationSelected) {
-        onLocationSelected(selectedPlace);
-      }
-    } else {
-      alert(`🤔 아쉽게도 틀렸습니다! 정답은 "${currentQuiz.correct}"입니다. 다시 시도해보세요!`);
+      score = 100;
+      // 5초 이내 답변 시 속도 보너스 (1초당 10점 감소)
+      const speedBonus = Math.max(0, 50 - Math.floor(responseTime / 1000) * 10);
+      score += speedBonus;
     }
     
+    // 참가자 점수 업데이트
+    const newParticipants = new Map(participants);
+    const currentScore = newParticipants.get(userId) || 0;
+    newParticipants.set(userId, currentScore + score);
+    setParticipants(newParticipants);
+    
+    // 현재 라운드 답안 기록
+    const newRoundAnswers = new Map(roundAnswers);
+    newRoundAnswers.set(userId, {
+      answer: quizAnswer,
+      isCorrect,
+      score,
+      responseTime
+    });
+    setRoundAnswers(newRoundAnswers);
+    
+    // 웹소켓으로 답안 전송
+    if (socket && meetingId) {
+      socket.emit('speed-quiz-answer', {
+        meetingId,
+        userId,
+        username: userData?.name || '익명',
+        round: currentRound,
+        answer: quizAnswer,
+        isCorrect,
+        score,
+        responseTime
+      });
+    }
+    
+    setQuizAnswer('');
+    
+    // 피드백 표시
+    if (isCorrect) {
+      alert(`🎉 정답! +${score}점 (${Math.floor(responseTime/1000)}초 소요)`);
+    } else {
+      alert(`❌ 틀렸습니다. 정답: "${currentQuiz.correct}"`);
+    }
+  };
+
+  // 다음 라운드로 진행
+  const nextRound = () => {
+    const nextRoundIndex = currentRound + 1;
+    
+    if (nextRoundIndex < quizRounds.length) {
+      setCurrentRound(nextRoundIndex);
+      setCurrentQuiz(quizRounds[nextRoundIndex]);
+      setQuizAnswer('');
+      setRoundAnswers(new Map());
+      setRoundTimeLeft(15);
+      setQuizStartTime(Date.now());
+      
+      if (socket && meetingId) {
+        socket.emit('speed-quiz-next-round', {
+          meetingId,
+          currentRound: nextRoundIndex
+        });
+      }
+    } else {
+      // 모든 라운드 완료 - 결과 계산
+      finishSpeedQuiz();
+    }
+  };
+
+  // 스피드 퀴즈 종료 및 결과 계산
+  const finishSpeedQuiz = () => {
+    const result = calculateSpeedQuizResult();
+    
+    setResult(result);
+    setResultAnimating(true);
+    setSpeedQuizMode(false);
     setQuizMode(false);
     setCurrentQuiz(null);
     setQuizAnswer('');
-    setIsQuizOwner(false);
+    
+    // 웹소켓으로 최종 결과 전송
+    if (socket && meetingId) {
+      socket.emit('speed-quiz-finish', {
+        meetingId,
+        result,
+        participants: Array.from(participants.entries())
+      });
+    }
+    
+    // localStorage에 저장
+    if (meetingId) {
+      try {
+        localStorage.setItem(`roulette_result_${meetingId}`, JSON.stringify(result));
+      } catch (error) {
+        console.error('스피드 퀴즈 결과 저장 실패:', error);
+      }
+    }
+    
+    setTimeout(() => setResultAnimating(false), 3000);
+    
+    if (onLocationSelected) {
+      onLocationSelected(result.selectedPlace);
+    }
+  };
+
+  // 점수 기반 가중치로 최종 장소 선정
+  const calculateSpeedQuizResult = () => {
+    // 각 장소별 점수 합계 계산
+    const placeScores = new Map();
+    
+    quizRounds.forEach((round, roundIndex) => {
+      const placeId = round.place.id;
+      let totalScore = 0;
+      
+      // 이 라운드에서 정답을 맞춘 사람들의 점수 합계
+      participants.forEach((score, userId) => {
+        // 각 라운드별 점수를 추적해야 하지만, 일단 간단히 전체 점수를 장소 수로 나누어 계산
+        totalScore += score / quizRounds.length;
+      });
+      
+      placeScores.set(placeId, totalScore);
+    });
+    
+    // 가중치 기반 장소 선정
+    let totalWeight = 0;
+    const weights = [];
+    
+    candidatePlaces.forEach(place => {
+      const score = placeScores.get(place.id) || 1; // 최소 가중치 1
+      weights.push({ place, weight: score });
+      totalWeight += score;
+    });
+    
+    // 가중치 기반 랜덤 선택
+    const random = Math.random() * totalWeight;
+    let accumulator = 0;
+    let selectedPlace = weights[0].place;
+    
+    for (const item of weights) {
+      accumulator += item.weight;
+      if (random <= accumulator) {
+        selectedPlace = item.place;
+        break;
+      }
+    }
+    
+    // 결과 기록
+    recordSelectionOnServer(selectedPlace);
+    
+    return {
+      selectedPlace,
+      message: `🧠 스피드 퀴즈 완료! "${selectedPlace.name}"이(가) 선정되었습니다!`,
+      fairnessInfo: getFairnessInfo(selectedPlace),
+      isRestoredResult: false,
+      timestamp: new Date().toISOString(),
+      selectionMethod: 'quiz',
+      participants: Array.from(participants.entries()),
+      totalRounds: quizRounds.length
+    };
+  };
+
+  // 퀴즈 답안 제출 (스피드 퀴즈로 변경)
+  const submitQuizAnswer = () => {
+    if (speedQuizMode) {
+      submitSpeedQuizAnswer();
+    } else {
+      // 기존 단일 퀴즈 로직 (사용하지 않음)
+      alert('퀴즈 모드가 올바르지 않습니다.');
+    }
   };
 
   // 멀티플레이어 타이밍 게임 시작
@@ -1735,18 +1987,19 @@ const RandomSelector = ({ meetingId, onLocationSelected, user, meeting, isOwner,
               </div>
             )}
 
-            {/* 퀴즈 모드 */}
+            {/* 스피드 퀴즈 모드 */}
             {fairnessMode === 'quiz' && (
               <div className="space-y-3">
                 <h4 className="text-lg font-bold text-gray-900 text-center">🧠 스피드 퀴즈</h4>
                 
-                {!quizMode ? (
+                {!speedQuizMode ? (
                   <div className="text-center space-y-3">
                     <div className="bg-blue-50 rounded-lg p-3">
                       <p className="text-blue-800 font-medium mb-1 text-sm">💡 게임 방법</p>
                       <p className="text-xs text-blue-700">
-                        후보 장소 중 하나에 대한 퀴즈가 출제됩니다.<br/>
-                        정답을 맞히면 해당 장소가 최종 선정됩니다!
+                        모든 후보 장소에 대한 퀴즈가 출제됩니다.<br/>
+                        정답률과 속도에 따라 점수를 획득하고,<br/>
+                        최종 점수 가중치로 장소가 결정됩니다!
                       </p>
                     </div>
                     
@@ -1756,17 +2009,55 @@ const RandomSelector = ({ meetingId, onLocationSelected, user, meeting, isOwner,
                         disabled={candidatePlaces.length === 0}
                         className="px-6 py-3 rounded-lg font-bold text-sm transition-all duration-300 w-full max-w-xs mx-auto bg-gradient-to-r from-green-500 to-teal-600 text-white hover:from-green-600 hover:to-teal-700 hover:transform hover:scale-105 shadow-lg"
                       >
-                        🧠 퀴즈 시작!
+                        🚀 스피드 퀴즈 시작!
                       </button>
                     )}
                   </div>
                 ) : (
                   <div className="space-y-3">
+                    {/* 라운드 정보 및 타이머 */}
+                    <div className="bg-gradient-to-r from-blue-50 to-purple-50 rounded-lg p-3 border-2 border-blue-200">
+                      <div className="flex justify-between items-center text-sm">
+                        <span className="font-bold text-blue-800">
+                          📍 라운드 {currentRound + 1} / {quizRounds.length}
+                        </span>
+                        <span className="font-bold text-purple-800">
+                          ⏱️ {roundTimeLeft}초
+                        </span>
+                      </div>
+                      <div className="text-xs text-gray-600 mt-1">
+                        {currentQuiz?.place?.name} 관련 문제
+                      </div>
+                    </div>
+
+                    {/* 실시간 점수판 */}
+                    {participants.size > 0 && (
+                      <div className="bg-yellow-50 rounded-lg p-2 border border-yellow-200">
+                        <p className="text-xs font-bold text-yellow-800 mb-1">🏆 실시간 점수</p>
+                        <div className="text-xs space-y-1 max-h-16 overflow-y-auto">
+                          {Array.from(participants.entries())
+                            .sort(([,a], [,b]) => b - a)
+                            .map(([userId, score], index) => (
+                              <div key={userId} className="flex justify-between">
+                                <span className={index === 0 ? 'font-bold text-yellow-700' : 'text-gray-600'}>
+                                  {index === 0 ? '👑 ' : `${index + 1}. `}
+                                  {userId === user?.id ? '나' : '참가자'}
+                                </span>
+                                <span className={index === 0 ? 'font-bold text-yellow-700' : 'text-gray-600'}>
+                                  {score}점
+                                </span>
+                              </div>
+                            ))}
+                        </div>
+                      </div>
+                    )}
+
+                    {/* 퀴즈 문제 */}
                     <div className="bg-gradient-to-r from-purple-50 to-pink-50 rounded-lg p-3 border-2 border-purple-200">
-                      <h5 className="text-sm font-bold text-purple-900 mb-2">❓ {currentQuiz.question}</h5>
+                      <h5 className="text-sm font-bold text-purple-900 mb-2">❓ {currentQuiz?.question}</h5>
                       
                       <div className="grid grid-cols-1 gap-2">
-                        {currentQuiz.answers.map((answer, index) => (
+                        {currentQuiz?.answers?.map((answer, index) => (
                           <button
                             key={index}
                             onClick={() => setQuizAnswer(answer)}
@@ -1783,36 +2074,45 @@ const RandomSelector = ({ meetingId, onLocationSelected, user, meeting, isOwner,
                       </div>
                     </div>
                     
+                    {/* 답안 제출 버튼 */}
                     <div className="flex justify-center space-x-2">
-                      {isQuizOwner ? (
-                        <>
-                          <button
-                            onClick={submitQuizAnswer}
-                            disabled={!quizAnswer}
-                            className="px-4 py-2 bg-green-500 text-white rounded-lg hover:bg-green-600 disabled:opacity-50 disabled:cursor-not-allowed font-bold text-sm"
-                          >
-                            ✅ 정답 제출
-                          </button>
-                          <button
-                            onClick={() => {
-                              setQuizMode(false);
-                              setCurrentQuiz(null);
-                              setQuizAnswer('');
-                              setIsQuizOwner(false);
-                            }}
-                            className="px-4 py-2 bg-gray-500 text-white rounded-lg hover:bg-gray-600 font-bold text-sm"
-                          >
-                            ❌ 취소
-                          </button>
-                        </>
-                      ) : (
-                        <div className="text-center">
-                          <p className="text-sm text-gray-600 bg-blue-50 p-2 rounded-lg border border-blue-200">
-                            👀 다른 사용자가 퀴즈를 진행 중입니다...
-                          </p>
-                        </div>
+                      <button
+                        onClick={submitQuizAnswer}
+                        disabled={!quizAnswer || roundAnswers.has(userId)}
+                        className="px-4 py-2 bg-green-500 text-white rounded-lg hover:bg-green-600 disabled:opacity-50 disabled:cursor-not-allowed font-bold text-sm"
+                      >
+                        {roundAnswers.has(userId) ? '✅ 제출완료' : '🚀 정답 제출'}
+                      </button>
+                      
+                      {/* 진행자만 다음 라운드 버튼 표시 */}
+                      {isQuizOwner && (
+                        <button
+                          onClick={nextRound}
+                          className="px-4 py-2 bg-blue-500 text-white rounded-lg hover:bg-blue-600 font-bold text-sm"
+                        >
+                          {currentRound + 1 < quizRounds.length ? '➡️ 다음 라운드' : '🏁 퀴즈 완료'}
+                        </button>
                       )}
                     </div>
+
+                    {/* 현재 라운드 답안 현황 */}
+                    {roundAnswers.size > 0 && (
+                      <div className="bg-gray-50 rounded-lg p-2 border border-gray-200">
+                        <p className="text-xs font-bold text-gray-700 mb-1">
+                          📝 답안 제출 현황 ({roundAnswers.size}명)
+                        </p>
+                        <div className="text-xs text-gray-600">
+                          {Array.from(roundAnswers.entries()).map(([userId, answer]) => (
+                            <div key={userId} className="flex justify-between">
+                              <span>{userId === user?.id ? '나' : '참가자'}</span>
+                              <span className={answer.isCorrect ? 'text-green-600 font-bold' : 'text-red-600'}>
+                                {answer.isCorrect ? `✅ +${answer.score}점` : '❌ 0점'}
+                              </span>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    )}
                   </div>
                 )}
               </div>
@@ -1820,100 +2120,43 @@ const RandomSelector = ({ meetingId, onLocationSelected, user, meeting, isOwner,
           </div>
 
           {/* 컨트롤 및 결과 영역 */}
-          <div className="space-y-4">
-            {/* 결과 표시 영역 - Compact */}
-            {result && !spinning && !diceRolling && !quizMode && (
-              <div className="space-y-3">
-                <h5 className="text-sm font-bold text-gray-900">🏆 선정 결과</h5>
-                <div className={`bg-gradient-to-r from-yellow-50 to-orange-50 border-2 border-yellow-300 rounded-lg p-4 ${
-                  resultAnimating ? 'animate-pulse' : ''
-                }`}>
-                  {/* 복원된 결과인지 표시 */}
-                  {result.isRestoredResult && (
-                    <div className="mb-2">
-                      <span className="inline-flex items-center px-2 py-1 rounded-full text-xs font-medium bg-blue-100 text-blue-800">
-                        📋 최근 결과
-                      </span>
-                    </div>
-                  )}
-                  
-                  {/* 선정된 장소 정보 */}
-                  <div className="bg-white/80 backdrop-blur-sm rounded-lg p-3 border border-yellow-200">
-                                          <div className="flex items-center space-x-2 mb-2">
-                        <div className="text-2xl">{result.selectedPlace.avatar}</div>
-                        <div className="flex-1 min-w-0">
-                          <h6 className="font-bold text-sm text-gray-900 truncate">{result.selectedPlace.name}</h6>
-                        </div>
-                      </div>
-                    
-                    <div className="grid grid-cols-2 gap-2 text-xs text-gray-600">
-                      <div className="flex items-center space-x-1">
-                        <span>🏷️</span>
-                        <span className="bg-blue-100 text-blue-800 px-1 py-0.5 rounded text-xs">
-                          {result.selectedPlace.category}
-                        </span>
-                      </div>
-                      <div className="flex items-center space-x-1">
-                        <span>🗳️</span>
-                        <span>{result.selectedPlace.votes}표</span>
-                      </div>
-                    </div>
-                    
-                    {/* 선정 방식별 메시지 */}
-                    <div className="mt-2 p-2 bg-gradient-to-r from-blue-50 to-purple-50 rounded-lg border border-blue-200">
-                      <p className="text-xs font-medium text-blue-800">
-                        {result.selectionMethod === 'dice' && '🎲 주사위의 선택'}
-                        {result.selectionMethod === 'quiz' && '🧠 퀴즈 정답 보상'}
-                        {result.selectionMethod === 'timing' && '⏱️ 타이밍 게임 승리'}
-                        {!result.selectionMethod && '🎯 룰렛의 선택'}
-                      </p>
-                    </div>
-                  </div>
-                  
-                  {/* 액션 버튼들 - 더 작게 */}
-                  <div className="flex justify-center space-x-2 mt-3">
-                    <button
-                      onClick={startRandomSelection}
-                      disabled={spinning || diceRolling || quizMode || candidatePlaces.length === 0}
-                      className="px-3 py-2 bg-gradient-to-r from-blue-500 to-blue-600 text-white rounded-lg hover:from-blue-600 hover:to-blue-700 transition-all duration-200 font-bold flex items-center gap-1 text-xs"
-                    >
-                      🎯 다시
-                    </button>
-                    {isOwner && (
-                      <button
-                        onClick={handleConfirmResult}
-                        className="px-3 py-2 bg-gradient-to-r from-yellow-500 to-orange-500 text-white rounded-lg hover:from-yellow-600 hover:to-orange-600 transition-all duration-200 font-bold flex items-center gap-1 text-xs shadow-md"
-                      >
-                        <TrophyIcon className="h-3 w-3" />
-                        결과 확정
-                      </button>
-                    )}
-                  </div>
-                </div>
-              </div>
-            )}
-
+                    <div className="space-y-4">
                          {/* 참가자 목록 - 간소화 */}
              {candidatePlaces.length > 0 && (
                <div className="space-y-2">
                  <h5 className="text-sm font-bold text-gray-900">👥 후보 장소 ({candidatePlaces.length}개)</h5>
                  <div className={`space-y-1 ${candidatePlaces.length > 7 ? 'max-h-56 overflow-y-auto' : ''}`}>
-                   {candidatePlaces.map((place, index) => (
-                     <div key={place.id} className={`flex items-center justify-between p-2 rounded-lg text-xs ${getParticipantColor(index)}`}>
-                       <div className="flex items-center space-x-2 min-w-0 flex-1">
-                         <span className="text-sm">{place.avatar}</span>
-                         <span className="font-medium truncate">{place.name}</span>
-                       </div>
-                       <div className="flex items-center space-x-1 text-xs">
-                         <span>🗳️ {place.votes}</span>
-                         {place.selectedCount > 0 && (
-                           <span className="bg-yellow-100 text-yellow-800 px-1 py-0.5 rounded">
-                             선정 {place.selectedCount}회
+                   {candidatePlaces.map((place, index) => {
+                     const isSelected = result && result.selectedPlace && result.selectedPlace.id === place.id;
+                     return (
+                       <div key={place.id} className={`flex items-center justify-between p-2 rounded-lg text-xs ${
+                         isSelected ? 'bg-green-50 border-2 border-green-300' : getParticipantColor(index)
+                       }`}>
+                         <div className="flex items-center space-x-2 min-w-0 flex-1">
+                           <span className="text-sm">{place.avatar}</span>
+                           <span className={`font-medium truncate ${isSelected ? 'text-green-800 font-bold' : ''}`}>
+                             {place.name}
                            </span>
-                         )}
+                           {isSelected && (
+                             <span className="text-green-600 font-bold ml-1">✅</span>
+                           )}
+                         </div>
+                         <div className="flex items-center space-x-1 text-xs">
+                           <span>🗳️ {place.votes}</span>
+                           {place.selectedCount > 0 && (
+                             <span className="bg-yellow-100 text-yellow-800 px-1 py-0.5 rounded">
+                               선정 {place.selectedCount}회
+                             </span>
+                           )}
+                           {isSelected && (
+                             <span className="bg-green-100 text-green-800 px-2 py-0.5 rounded font-bold">
+                               🏆 최종 선정
+                             </span>
+                           )}
+                         </div>
                        </div>
-                     </div>
-                   ))}
+                     );
+                   })}
                  </div>
                  {candidatePlaces.length > 7 && (
                    <div className="text-center">

@@ -58,8 +58,8 @@ const AIAssistant = ({ meetingData, onPlaceRecommendation }) => {
   // 기본 환영 메시지 생성
   const getDefaultMessages = useCallback(() => {
     const welcomeMessage = userLevel === USER_LEVELS.GUEST
-      ? `안녕하세요! 미팅 장소 추천 AI 도우미입니다. 🤖\n\n게스트 사용자는 하루 ${userPermissions.aiDailyLimit}회까지 AI 추천을 무료로 체험할 수 있습니다.\n\n어떤 종류의 미팅이신가요? 참여자 수, 지역, 예산, 목적 등을 알려주시면 최적의 장소를 추천해드릴게요!`
-      : `안녕하세요! 미팅 장소 추천 AI 도우미입니다. 🤖\n\n어떤 종류의 미팅이신가요? 참여자 수, 지역, 예산, 목적, 날씨, 교통 등을 알려주시면 최적의 장소를 추천해드릴게요!`;
+      ? `안녕하세요! 미팅 장소 추천 AI 도우미입니다.\n\n게스트 사용자는 하루 ${userPermissions.aiDailyLimit}회까지 AI 추천을 무료로 체험할 수 있습니다.\n\n어떤 종류의 미팅이신가요? 참여자 수, 지역, 예산, 목적 등을 알려주시면 최적의 장소를 추천해드릴게요!`
+      : `안녕하세요! 미팅 장소 추천 AI 도우미입니다.\n\n 참여자 수, 지역, 예산, 목적, 날씨, 교통 등을 알려주시면 최적의 장소를 추천해드릴게요!`;
     
     return [
       {
@@ -74,7 +74,7 @@ const AIAssistant = ({ meetingData, onPlaceRecommendation }) => {
   const [inputMessage, setInputMessage] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState(null);
-  const [shouldScroll, setShouldScroll] = useState(true);
+  const [shouldScroll, setShouldScroll] = useState(false);
   const [aiUsageStatus, setAiUsageStatus] = useState({ used: 0, remaining: 0, canUse: true });
   const messagesEndRef = useRef(null);
   const isInitialMount = useRef(true);
@@ -83,6 +83,8 @@ const AIAssistant = ({ meetingData, onPlaceRecommendation }) => {
   const [toastMessage, setToastMessage] = useState('');
   const [showToast, setShowToast] = useState(false);
   const [toastType, setToastType] = useState('success'); // success, error, warning
+  const [toastAction, setToastAction] = useState(null); // 토스트에 액션 버튼 추가용
+  const [lastAddedPlace, setLastAddedPlace] = useState(null); // 마지막 추가된 장소 추적
 
   // 게스트 사용자 AI 사용량 상태 업데이트
   useEffect(() => {
@@ -100,15 +102,46 @@ const AIAssistant = ({ meetingData, onPlaceRecommendation }) => {
   }, [userLevel, userPermissions.aiDailyLimit]);
 
   // 토스트 팝업 표시 함수
-  const showToastNotification = (message, type = 'success') => {
+  const showToastNotification = (message, type = 'success', action = null) => {
     setToastMessage(message);
     setToastType(type);
+    setToastAction(action);
     setShowToast(true);
     
-    // 3초 후 자동으로 사라지게
+    // 액션이 있으면 5초, 없으면 3초 후 자동으로 사라지게
+    const timeout = action ? 5000 : 3000;
     setTimeout(() => {
       setShowToast(false);
-    }, 3000);
+      setToastAction(null);
+    }, timeout);
+  };
+
+  // 마지막 추가된 장소 제거 함수
+  const removeLastAddedPlace = async () => {
+    if (!lastAddedPlace) return;
+
+    try {
+      // meetingData가 있고 meetingId가 있으면 서버에서 제거
+      if (meetingData?.id && lastAddedPlace.meetingId === meetingData.id) {
+        const response = await api.delete(`/votes/${meetingData.id}/candidates/${lastAddedPlace.placeId}`);
+        
+        if (response.data.success) {
+          showToastNotification(`"${lastAddedPlace.placeName}" 후보지에서 제거되었습니다.`, 'success');
+          setLastAddedPlace(null);
+          setShowToast(false);
+          return;
+        }
+      }
+      
+      // 실패하거나 meetingData가 없으면 알림만
+      showToastNotification(`"${lastAddedPlace.placeName}" 제거를 완료했습니다.`, 'success');
+      setLastAddedPlace(null);
+      setShowToast(false);
+      
+    } catch (error) {
+      console.error('장소 제거 실패:', error);
+      showToastNotification(`"${lastAddedPlace.placeName}" 제거에 실패했습니다.`, 'error');
+    }
   };
 
   // 메시지가 변경될 때마다 localStorage에 저장
@@ -123,10 +156,10 @@ const AIAssistant = ({ meetingData, onPlaceRecommendation }) => {
     // 초기 마운트 플래그 해제
     if (isInitialMount.current) {
       isInitialMount.current = false;
+      // 초기 마운트 시에는 스크롤하지 않음
+      setShouldScroll(false);
     }
-    
-    // 스크롤 플래그 리셋
-    setShouldScroll(true);
+    // 이후에는 setShouldScroll을 자동으로 리셋하지 않음 (각 메시지 추가 시에만 true로 설정)
   }, [messages, shouldScroll, getChatHistoryKey]);
 
   // 컨텍스트 정보 생성 (대화 히스토리 포함)
@@ -197,6 +230,7 @@ const AIAssistant = ({ meetingData, onPlaceRecommendation }) => {
         };
         
         setMessages(prev => [...prev, errorChatMessage]);
+        setShouldScroll(true);
         return;
       }
     }
@@ -214,6 +248,9 @@ const AIAssistant = ({ meetingData, onPlaceRecommendation }) => {
     setInputMessage('');
     setIsLoading(true);
     setError(null);
+    
+    // 사용자 메시지 추가 시 스크롤 활성화
+    setShouldScroll(true);
 
     try {
       // 헤더 설정 (토큰이 있으면 추가)
@@ -274,6 +311,7 @@ const AIAssistant = ({ meetingData, onPlaceRecommendation }) => {
               };
               
               setMessages(prev => [...prev, aiMessage]);
+              setShouldScroll(true);
               
             } else {
               throw new Error('장소 검증에 실패했습니다.');
@@ -290,6 +328,7 @@ const AIAssistant = ({ meetingData, onPlaceRecommendation }) => {
              };
              
              setMessages(prev => [...prev, aiMessage]);
+             setShouldScroll(true);
            }
         } else {
           // 장소 추천이 아닌 일반 응답
@@ -300,6 +339,7 @@ const AIAssistant = ({ meetingData, onPlaceRecommendation }) => {
           };
           
           setMessages(prev => [...prev, aiMessage]);
+          setShouldScroll(true);
         }
 
         // 게스트 사용자의 경우 AI 사용량 업데이트
@@ -314,6 +354,7 @@ const AIAssistant = ({ meetingData, onPlaceRecommendation }) => {
               timestamp: new Date()
             };
             setMessages(prev => [...prev, limitMessage]);
+            setShouldScroll(true);
           }
         }
       } else {
@@ -364,6 +405,7 @@ const AIAssistant = ({ meetingData, onPlaceRecommendation }) => {
       };
       
       setMessages(prev => [...prev, errorChatMessage]);
+      setShouldScroll(true);
       
     } finally {
       setIsLoading(false);
@@ -432,8 +474,25 @@ const AIAssistant = ({ meetingData, onPlaceRecommendation }) => {
           });
           
           if (response.data.success) {
-            // 성공 토스트 팝업 표시
-            showToastNotification(`✅ "${placeName}"이(가) 그룹투표 후보지에 추가되었습니다!`, 'success');
+            // 마지막 추가된 장소 정보 저장
+            setLastAddedPlace({
+              placeName: placeName,
+              placeId: placeData.id,
+              meetingId: meetingData.id,
+              addedAt: new Date()
+            });
+            
+            // 취소 버튼이 있는 성공 토스트 팝업 표시
+            const undoAction = {
+              label: '취소',
+              onClick: removeLastAddedPlace
+            };
+            
+            showToastNotification(
+              `✅ "${placeName}"이(가) 그룹투표 후보지에 추가되었습니다!`, 
+              'success', 
+              undoAction
+            );
             return;
           }
         } catch (error) {
@@ -455,8 +514,25 @@ const AIAssistant = ({ meetingData, onPlaceRecommendation }) => {
         // 스크롤 방지 플래그 설정
         setShouldScroll(false);
         
-        // 성공 토스트 팝업 표시
-        showToastNotification(`✅ "${placeName}"이(가) 후보 장소에 추가되었습니다!`, 'success');
+        // 마지막 추가된 장소 정보 저장 (meetingId는 없음)
+        setLastAddedPlace({
+          placeName: placeName,
+          placeId: placeData.id,
+          meetingId: null,
+          addedAt: new Date()
+        });
+        
+        // 취소 버튼이 있는 성공 토스트 팝업 표시
+        const undoAction = {
+          label: '취소',
+          onClick: removeLastAddedPlace
+        };
+        
+        showToastNotification(
+          `✅ "${placeName}"이(가) 후보 장소에 추가되었습니다!`, 
+          'success', 
+          undoAction
+        );
       }
       
     } catch (error) {
@@ -581,10 +657,12 @@ const AIAssistant = ({ meetingData, onPlaceRecommendation }) => {
     return null;
   };
 
-  // 자동 스크롤
+  // 자동 스크롤 (초기 마운트 시에는 스크롤하지 않음)
   useEffect(() => {
-    if (shouldScroll) {
+    if (shouldScroll && !isInitialMount.current) {
       messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+      // 스크롤 수행 후 플래그 리셋
+      setShouldScroll(false);
     }
   }, [messages, shouldScroll]);
 
@@ -659,50 +737,54 @@ const AIAssistant = ({ meetingData, onPlaceRecommendation }) => {
                 </div>
                 <div className="places-grid">
                   {extractedPlaces.map((place, placeIndex) => (
-                    <div key={placeIndex} className="place-card">
+                    <div 
+                      key={placeIndex} 
+                      className="place-card clickable"
+                      onClick={() => addRecommendedPlace(
+                        place.name, 
+                        place.category, 
+                        place.address || place.description,
+                        place // 전체 검증된 장소 정보 전달
+                      )}
+                      title="클릭하여 후보지에 추가"
+                    >
                       <div className="place-info">
                         <div className="place-header">
                           <h5 className="place-name">{place.name}</h5>
                           {place.verified && (
-                            <span className="verified-badge" title="실제 존재하는 장소입니다">✅</span>
+                            <span className="verified-badge" title="실제 존재하는 장소입니다">검증됨</span>
                           )}
                         </div>
                         <p className="place-category">{getCategoryIcon(place.category)} {getCategoryName(place.category)}</p>
                         
                         {/* 검증된 장소의 경우 실제 주소와 평점 표시 */}
                         {place.verified ? (
-                          <>
+                          <div className="place-details">
                             {place.address && (
                               <p className="place-address">📍 {place.address}</p>
                             )}
                             {place.rating > 0 && (
-                              <p className="place-rating">⭐ {place.rating}</p>
+                              <p className="place-rating">⭐ {place.rating}점</p>
                             )}
                             {place.phone && (
                               <p className="place-phone">📞 {place.phone}</p>
                             )}
-                          </>
+                          </div>
                         ) : (
                           <>
                             <p className="place-description">{place.description}</p>
-                            {place.hasAddress && place.address && (
-                              <p className="place-address">📍 {place.address}</p>
-                            )}
+                            <div className="place-details">
+                              {place.hasAddress && place.address && (
+                                <p className="place-address">📍 {place.address}</p>
+                              )}
+                            </div>
                           </>
                         )}
                       </div>
-                      <button 
-                        onClick={() => addRecommendedPlace(
-                          place.name, 
-                          place.category, 
-                          place.address || place.description,
-                          place // 전체 검증된 장소 정보 전달
-                        )}
-                        className="add-place-btn"
-                        title="그룹투표에 추가"
-                      >
-                        ➕ 추가
-                      </button>
+                      
+                      <div className="place-card-action">
+                        <span className="add-indicator">➕ 클릭하여 추가</span>
+                      </div>
                     </div>
                   ))}
                 </div>
@@ -750,14 +832,14 @@ const AIAssistant = ({ meetingData, onPlaceRecommendation }) => {
   return (
     <div className="ai-assistant">
       <div className="ai-assistant-header">
-        <h3>🤖 AI 장소 추천 도우미</h3>
+        <h3>AI 장소 추천 도우미</h3>
         <div className="header-actions">
           <button 
             onClick={clearChatHistory}
             className="clear-chat-btn"
             title="채팅 히스토리 초기화"
           >
-            🗑️
+            🔄
           </button>
           
           {/* 사용자 레벨 표시 */}
@@ -883,8 +965,20 @@ const AIAssistant = ({ meetingData, onPlaceRecommendation }) => {
 
       {/* 토스트 팝업 */}
       {showToast && (
-        <div className={`toast-notification ${toastType}`}>
-          {toastMessage}
+        <div className={`toast-notification ${toastType} ${toastAction ? 'with-action' : ''}`}>
+          <span className="toast-message">{toastMessage}</span>
+          {toastAction && (
+            <button 
+              className="toast-action-btn"
+              onClick={() => {
+                toastAction.onClick();
+                setShowToast(false);
+                setToastAction(null);
+              }}
+            >
+              {toastAction.label}
+            </button>
+          )}
         </div>
       )}
     </div>

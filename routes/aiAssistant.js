@@ -1189,7 +1189,7 @@ router.post('/chat', async (req, res) => {
 
       console.log('📤 Gemini API 요청 중...', {
         model: AVAILABLE_MODELS[CURRENT_MODEL],
-        apiKeyPreview: `${currentApiKey.substring(0, 8)}...`,
+        apiKeyPreview: `${currentApiKey.substring(0, 25)}...`,
         messageLength: message.length
       });
 
